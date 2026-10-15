@@ -1,131 +1,114 @@
 # srm-nav-2026
 
-SRM 校内赛 **导航赛道**上位机代码仓库。
+SRM 校内赛 **导航赛道** 上位机代码仓库：控制全向平移车绕两根桩完成 8 字路线（先下桩逆时针、后上桩顺时针），起终点同为停车位。
 
-> 目标：控制实车绕两根桩完成 8 字路线（先下瓣逆时针、后上瓣顺时针），起终点同为停车位。
-> 依据：[`导航赛道学习计划书.md`](../导航赛道学习计划书.md) · [`协议与ROS2方案核查.md`](../协议与ROS2方案核查.md) · [`测试与交付操作手册.md`](../测试与交付操作手册.md)
-
----
-
-## 1. 当前状态
-
-已完成：**`core/` 的骨架**（接口、CMake、测试骨架全部就位；**实现留 TODO 给你填**）。
-未开始：`ros/`（点云、Gazebo、串口、`fake_mcu`）—— 等 Ubuntu + ROS 2 环境就绪后再生成。
+> 传感器：Livox Mid-360 雷达；计算设备：Intel NUC；通信：串口 115200 8N1（19 字节帧）。
 
 ---
 
-## 2. 目录结构
+## 目录结构
 
 ```text
 srm-nav-2026/
-├── core/                     ★ 纯 C++，零依赖，Windows / WSL / NUC 都能编译
-│   ├── CMakeLists.txt
-│   ├── include/nav/*.hpp     接口（已写好，含语义与判据注释）
-│   ├── src/*.cpp             ← 只放了空实现 + TODO，等你填
-│   └── test/*.cpp            测试骨架（断言里写死了协议真值）
-├── ros/                      待生成：ROS 2 节点、fake_mcu、launch、world
-├── tools/                    待生成：虚拟串口端到端、桩检测回归、R_bc 标定、故障注入
-├── scripts/                  待生成：preflight.sh / postflight.sh
-└── docs/                     协议要点、标定报告、每天的调试记录
+├── core/                    # 纯 C++ 核心库（零 ROS 依赖，可单独编译 + 单测）
+│   ├── include/nav/*.hpp    # 接口
+│   ├── src/*.cpp            # 协议 / 控制律 / 状态机 / 轴映射 / 桩检测 / 标定
+│   └── test/*.cpp           # 8 个单元测试
+├── ros/src/
+│   ├── nav_control/         # figure8 控制节点（状态机 + 控制律 + 打包）
+│   ├── nav_sim/             # 模拟：fake_mcu + 桩检测 + Gazebo 世界 + launch + RViz2
+│   └── nav_protocol/        # 串口后端（默认不编译，上车时启用）
+├── docs/                    # 答辩 / 详解 / 踩坑记录等文档
+├── tools/                   # headless 验证 / 诊断脚本
+├── build.sh                 # 一键构建（core + ROS 包）
+└── run_sim.sh               # 一键启动模拟
 ```
 
-**为什么这样分层**：`core/` 里全是"上车会咬人、但不需要 ROS 就能验"的逻辑（协议打包、CRC、
-控制律、状态机、`R_bc` 映射、标定算法）。把它抽干净之后，你可以在任何有 C++17 编译器的地方
-开发与单测，实车环境只跑薄薄一层包装。
+**分层原因**：`core/` 是「上车会咬人、但不需要 ROS 就能验」的逻辑（协议、控制、状态机、桩检测）。
+抽成纯 C++ 后，在任何有 C++17 编译器的地方都能开发和单测，**模拟与实车共用同一份 core**，
+实车只换「传感器源」和「执行器」。
 
 ---
 
-## 3. 构建与测试
+## 环境要求
 
-### 先装工具链（本机当前没有编译器和 CMake）
+- WSL2 + Ubuntu 22.04
+- ROS 2 Humble
+- Gazebo 11（`sudo apt install ros-humble-gazebo-ros-pkgs`）
+- CMake、g++、git、python3
 
-推荐 **WSL2 + Ubuntu**（一步同时解决编译、仿真、以及与 NUC 环境一致）：
+---
+
+## 构建
 
 ```bash
-wsl --install                 # Windows 侧，装完重启
-# 进入 Ubuntu 后：
-sudo apt update && sudo apt install -y build-essential cmake git
+bash build.sh
 ```
 
-备选：Windows 原生装 CMake + MSYS2/MinGW-w64（只能编译 `core/`，到了 NUC 还得重来）。
+脚本会：先构建并安装 `core/`（含单元测试），再 `colcon build` 三个 ROS 包。
 
-### 构建 + 跑测试
+## 跑测试
 
 ```bash
-cmake -S core -B build
-cmake --build build -j
-cd build && ctest --output-on-failure          # 全部
-# CMake ≥ 3.20 也可以从根目录跑：ctest --test-dir build --output-on-failure
+cmake -S core -B ~/build-nav-core
+cmake --build ~/build-nav-core -j
+(cd ~/build-nav-core && ctest --output-on-failure)   # 8/8 全绿
 ```
 
-单跑某一个（回到仓库根目录）：
+## 跑模拟（可视化）
 
 ```bash
-./build/test_crc                 # Linux / WSL
-.\build\Debug\test_crc.exe       # Windows + Visual Studio 这类多配置生成器
+bash run_sim.sh
 ```
 
-> **骨架阶段测试会失败**，这是设计意图：断言里写死了协议给的真值，
-> 你每填完一个 `src/*.cpp`，对应的测试就转绿。**不要改断言去迁就实现。**
+会弹出两个窗口：
 
----
+- **Gazebo**：车从停车位出发，自动走完八字（绕下桩→交叉点→绕上桩→回停车位）；
+- **RViz2**：实时显示激光扫描、检测到的桩（黄色圆柱）、坐标系。
 
-## 4. TODO 清单（按这个顺序填）
+无界面快速验证（确认「车能动、协议闭环」）：
 
-| 顺序 | 文件 | 要写什么 | 对应测试 |
-| --- | --- | --- | --- |
-| 1 | `src/crc.cpp` | CRC8 / CRC16（先位运算版，再查表版） | `test_crc` |
-| 2 | `src/frame.cpp` | 19 B 打包 + 下行流式组帧 | `test_frame` |
-| 3 | `src/rbc_map.cpp` | `R_bc` 映射（一行矩阵乘法）+ 正交性自检 + 读参数 | `test_rbc` |
-| 4 | `src/control.cpp` | 车体系绕桩控制律（径向/切向 P） | `test_control` |
-| 5 | `src/safe_cmd.cpp` | 限幅 / `isfinite` / 500 ms 看门狗 | `test_safe_cmd` |
-| 6 | `src/calib.cpp` | 位移方向估计（质心差法起步）+ 解 `R_bc` | `test_calib` |
-| 7 | `src/state_machine.cpp` | 7 状态机（含"恰好触发一次"与丢桩降级） | `test_state_machine` |
-
-每个 `.cpp` 顶部都写了**实现步骤 + 坑 + 手算自检例子**，照着填即可。
-
----
-
-## 5. 协议真值速查（测试断言用的就是这些）
-
-**上→下 19 字节**：`sof 0xA5` | `data_length=12`(u16 LE) | `seq` | `crc8`(覆盖 0–3，初值 `0xFF`) | `vx,vy,wz`(3×f32 LE) | `crc16`(覆盖 0–16，初值 `0xFFFF`，低字节在前)
-
-**下→上 `9+len`**：`sof` | `data_length` | `seq` | `crc8` | `cmd_id`(u16 LE) | data | `crc16`(覆盖 `7+len`，**含 cmd_id**)
-`cmd_id = 0x0001`（比赛状态，11 B）、`0x000B`（机器人状态，13 B）
-
-**CRC 自检**（对 ASCII `"123456789"`）：CRC8 = `0x0B`，CRC16 = `0x6F91`
-
-**三个参考帧**（`seq=1`）：
-
-| 输入 | 19 字节 |
-| --- | --- |
-| `vx=1, vy=0, wz=0` | `A5 0C 00 01 26 00 00 80 3F 00 00 00 00 00 00 00 00 6B A3` |
-| 停车帧 | `A5 0C 00 01 26 00 00 00 00 00 00 00 00 00 00 00 00 18 9F` |
-| `vx=1, vy=-1, wz=3` | `A5 0C 00 01 26 00 00 80 3F 00 00 80 BF 00 00 40 40 D3 96` |
-
-**反馈示例帧**：`A5 0B 00 01 5C 01 00 AA 2C 01 88 77 66 55 44 33 22 11 EF 74`
-→ `cmd_id=0x0001`、`game_type=game_progress=0xA`、`stage_remain_time=300`、`sync_time_stamp=0x1122334455667788`
-
-**安全约束**：`wz` 不生效；限幅是上位机责任；不要发 `NaN`/`Inf`；协议**没有超时保护** → 启动即发零速帧、异常/退出补发零速帧、500 ms 看门狗。
-
----
-
-## 6. `R_bc` 是什么
-
-那个「90° 轴交叉」在代码里的**全部**实现就是 `rbc_map.cpp` 里的一行矩阵乘法：
-
-```
-(vx, vy)^T = R_bc · (v_body_x, v_body_y)^T
+```bash
+bash tools/verify_sim.sh && cat verify_result.txt
 ```
 
-`R_bc` 由 2026-10-11 的实车标定确定（点云静止参照物法，见操作手册 T7），写进参数文件。
-**符号或轴搞反时只改参数、不改代码。** 默认值取协议字面直译，仅作起点参考，**不要当结论**。
+---
+
+## 模拟数据流
+
+```
+Gazebo LiDAR ──/scan──> pile_detector ──/piles──> figure8 ──/raw_frame──> fake_mcu ──/cmd_vel──> Gazebo 车
+                        (桩检测：聚类+圆拟合)      (状态机+控制律+R_bc+SafeCmd+打包19字节)  (解析+换算)
+```
 
 ---
 
-## 7. 提交纪律
+## 技术要点
 
-- 小步提交，每步是"能跑通的状态"；
-- 提交信息写**为什么改**；
-- `bags/`、`*.pcd`、`*.bag` 一律不进仓库（已在 `.gitignore`）；
-- 每个第三方依赖在 README 标注出处与 LICENSE；**绝不包含 SRM 队内代码**。
+- **通信**：上→下固定 19 字节（`0xA5` + 长度 + seq + CRC8 + 3×float32 + CRC16）；下→上 `9+len`（含 cmd_id）。CRC 反射、无最终异或，自检值 CRC8(`"123456789"`)=`0x0B`、CRC16=`0x6F91`。
+- **90° 轴交叉**：协议里 `vx` 进底盘 y、`vy` 取负进底盘 x，用 2×2 矩阵 `R_bc` 统一处理（实车需标定）。
+- **控制律 A**（不需要 yaw/里程计/SLAM）：`v = v_t·t + k_r·(r−R)·u`，只用「桩在车体系的位置」绕桩。
+- **状态机**：`Idle → StraightIn → OrbitDown → Cross → OrbitUp → StraightOut → Stop`。
+- **安全**：限幅 ≤0.2、NaN/Inf 归零、500ms 看门狗、失联保护、launch 整体关闭。
+- **桩检测**：点云聚类 + 已知半径圆拟合（模拟 2D LaserScan 与实车 3D 点云投影复用同一套）。
+
+---
+
+## 上车前待办
+
+- [ ] 启用串口后端（`nav_protocol` 取消注释编译，改用 `/dev/serial/by-id/...`）
+- [ ] 解析下行帧 `cmd_id=0x0001` 的 `game_progress`，替代模拟里写死的 `started`
+- [ ] `R_bc` 实车标定（点云静止参照物法，`calib.cpp` 已实现算法）
+- [ ] 速度量级实测（协议约 10000:1，`vx=1.0`≈四分之一杆）
+- [ ] 实车看门狗（协议无超时保护，上位机崩溃时车会继续冲）
+
+---
+
+## 文档索引（docs/）
+
+- `中期答辩整理.md` — 框架 + 核心代码 + 答辩问答（20 题）
+- `雷达与控制-代码详解.md` — 雷达/控制代码逐行详解
+- `串口通信-代码详解.md` — 串口后端详解
+- `编译困难与解决.md` — 全部踩坑记录（16 条）
+- `调试困难与解决-详细版.md` — 关键问题深入分析（含 Nav2 决策）
+- `避障实现方案.md` — 避障思路讨论稿
