@@ -1,0 +1,151 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="figure8_world">
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- 下桩（绕逆时针） -->
+    <model name="pile_down">
+      <static>true</static>
+      <pose>0 -1.0 0.5 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.08</radius>
+              <length>1.0</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+          </material>
+        </visual>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.08</radius>
+              <length>1.0</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- 上桩（绕顺时针） -->
+    <model name="pile_up">
+      <static>true</static>
+      <pose>0 1.0 0.5 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.08</radius>
+              <length>1.0</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0 1 0 1</ambient>
+            <diffuse>0 1 0 1</diffuse>
+          </material>
+        </visual>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.08</radius>
+              <length>1.0</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- 全向车：内联进 world，绕开 spawn_entity（factory 插件在 WSL2 会崩）。
+         kinematic=true：SetLinearVel 精确控制速度，不被地面摩擦拖慢 -->
+    <model name="robot">
+      <kinematic>true</kinematic>
+      <pose>-1.5 -2.5 0.1 0 0 0</pose>
+      <link name="base_link">
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.27</radius>
+              <length>0.2</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0 0 1 1</ambient>
+            <diffuse>0 0 1 1</diffuse>
+          </material>
+        </visual>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.27</radius>
+              <length>0.2</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <inertial>
+          <mass>8.2</mass>
+          <inertia>
+            <ixx>0.06</ixx>
+            <ixy>0.0</ixy>
+            <ixz>0.0</ixz>
+            <iyy>0.06</iyy>
+            <iyz>0.0</iyz>
+            <izz>0.06</izz>
+          </inertia>
+        </inertial>
+
+        <!-- 360° 2D 激光雷达：检测竖直桩（水平截面是圆）。
+             抬高到车顶上方（世界 z=0.3，超出车圆柱最高 0.2），避免扫到车自身 -->
+        <sensor name="lidar" type="ray">
+          <pose>0 0 0.2 0 0 0</pose>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>720</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159</min_angle>
+                <max_angle>3.14159</max_angle>
+              </horizontal>
+            </scan>
+            <range>
+              <min>0.1</min>
+              <max>10.0</max>
+              <resolution>0.01</resolution>
+            </range>
+          </ray>
+          <plugin name="lidar_plugin" filename="libgazebo_ros_ray_sensor.so">
+            <ros>
+              <namespace>/</namespace>
+              <remapping>~/out:=/scan</remapping>
+            </ros>
+            <output_type>sensor_msgs/LaserScan</output_type>
+            <frame_name>base_link</frame_name>
+          </plugin>
+        </sensor>
+      </link>
+
+      <plugin name="planar_move" filename="libgazebo_ros_planar_move.so">
+        <ros>
+          <namespace>/</namespace>
+          <remapping>cmd_vel:=cmd_vel</remapping>
+          <remapping>odom:=odom</remapping>
+        </ros>
+        <command_topic>cmd_vel</command_topic>
+        <odometry_topic>odom</odometry_topic>
+        <odometry_frame>odom</odometry_frame>
+        <robot_base_frame>base_link</robot_base_frame>
+        <publish_odom_tf>true</publish_odom_tf>
+        <update_rate>50.0</update_rate>
+        <publish_rate>50.0</publish_rate>
+      </plugin>
+    </model>
+  </world>
+</sdf>
