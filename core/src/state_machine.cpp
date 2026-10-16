@@ -6,8 +6,7 @@ namespace nav {
 
 namespace {
 
-constexpr double kOrbitRadius = 0.55;
-constexpr double kOneTurnRad = 330.0 * 3.14159265358979323846 / 180.0;  // 330 度
+constexpr double kOneTurnRad = 270.0 * 3.14159265358979323846 / 180.0;  // 270 度
 constexpr double kResetAngleRad = 0.2;
 constexpr double kArriveDist = 0.15;
 constexpr int kMissingLimit = 15;
@@ -55,7 +54,7 @@ StepResult StateMachine::step(const SmInput& in) {
         if (in.started) { state_ = State::StraightIn; advanced = true; }
         break;
       case State::StraightIn:
-        if (std::hypot(in.b_near.x, in.b_near.y) <= kOrbitRadius * 1.05) {
+        if (std::hypot(in.b_near.x, in.b_near.y) <= in.orbit_radius * 1.05) {
           state_ = State::OrbitDown;
           angle_consumed_ = false;
           advanced = true;

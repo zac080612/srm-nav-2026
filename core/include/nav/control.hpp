@@ -8,7 +8,7 @@ struct Vec2 {
 };
 
 struct OrbitParams {
-  double R{0.55};    // 目标绕行半径 = 桩半径 + 车体半径 0.27 + 余量（10/14 实测后定）
+  double R{0.55};    // 目标绕行半径 = 桩半径 + 车体半径 0.27 + 余量（figure8 由检测半径动态算出）
   double v_t{0.08};  // 切向速度（起步 0.05–0.1）
   double k_r{0.20};  // 径向 P 增益
   bool ccw{true};    // true = 逆时针（下瓣），false = 顺时针（上瓣）

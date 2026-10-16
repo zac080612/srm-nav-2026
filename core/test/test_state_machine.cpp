@@ -1,5 +1,5 @@
 // T5：状态机离线测试 —— 不需要 Gazebo、不需要实车
-// 阈值依据：state_machine.hpp 顶部注释（330 度 ≈ 5.76 rad；交叉点/停车位判定 0.15 m）
+// 阈值依据：state_machine.hpp 顶部注释（270 度 ≈ 4.71 rad；交叉点/停车位判定 0.15 m）
 #include <cmath>
 
 #include "nav/state_machine.hpp"
@@ -8,7 +8,7 @@
 
 namespace {
 
-// 越过"绕满一圈"的累积角（弧度）。330 度 ≈ 5.76 rad，这里给到 6.0 rad 留余量，
+// 越过"绕满一圈"的累积角（弧度）。270 度 ≈ 4.71 rad，这里给到 6.0 rad 留余量，
 // 避免实现里用 >/>= 的细微差别把测试搞红。
 constexpr double kPastOneTurn = 6.0;
 

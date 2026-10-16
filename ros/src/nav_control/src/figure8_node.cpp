@@ -29,6 +29,9 @@ using nav::orbit_step;
 
 namespace {
 
+constexpr double kCarRadius = 0.27;  // 车体半径（URDF）
+constexpr double kMargin = 0.20;     // 绕桩安全余量
+
 double wrap_pi(double a) {
   while (a > M_PI) a -= 2.0 * M_PI;
   while (a < -M_PI) a += 2.0 * M_PI;
@@ -86,7 +89,7 @@ class Figure8Node : public rclcpp::Node {
     have_pose_ = true;
   }
 
-  // 桩位置转世界坐标，按世界 y 区分下桩/上桩
+  // 桩转世界坐标，按世界 y 分下/上桩，并用检测半径动态算绕桩半径 R
   void on_piles(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
     if (msg->markers.size() < 2) {
       have_piles_ = false;
@@ -94,16 +97,22 @@ class Figure8Node : public rclcpp::Node {
     }
     const double c = std::cos(car_yaw_);
     const double s = std::sin(car_yaw_);
-    std::vector<Vec2> world;
+
+    struct W { Vec2 pos; double radius; };
+    std::vector<W> world;
     for (const auto& m : msg->markers) {
       const double bx = m.pose.position.x;
       const double by = m.pose.position.y;
-      world.push_back({car_x_ + c * bx - s * by, car_y_ + s * bx + c * by});
+      world.push_back({{car_x_ + c * bx - s * by, car_y_ + s * bx + c * by},
+                       m.scale.x * 0.5});
     }
     std::sort(world.begin(), world.end(),
-              [](const Vec2& a, const Vec2& b) { return a.y < b.y; });
-    b_down_ = to_body(world.front().x, world.front().y);
-    b_up_ = to_body(world.back().x, world.back().y);
+              [](const W& a, const W& b) { return a.pos.y < b.pos.y; });
+
+    b_down_ = to_body(world.front().pos.x, world.front().pos.y);
+    b_up_ = to_body(world.back().pos.x, world.back().pos.y);
+    down_.R = world.front().radius + kCarRadius + kMargin;
+    up_.R = world.back().radius + kCarRadius + kMargin;
     have_piles_ = true;
   }
 
@@ -195,6 +204,7 @@ class Figure8Node : public rclcpp::Node {
     in.accum_angle = accum_angle_;
     in.dist_to_cross = std::hypot(b_cross.x, b_cross.y);
     in.dist_to_park = std::hypot(b_park.x, b_park.y);
+    in.orbit_radius = near_is_up ? up_.R : down_.R;
     sm_.step(in);
 
     // 斜坡：实际速度每帧向目标速度逼近 a_max*dt，避免切换时跳变

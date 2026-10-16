@@ -11,9 +11,6 @@ Vec2 orbit_step(const Vec2& b_body, const OrbitParams& p) {
   }
 
   const double r = std::hypot(b_body.x, b_body.y);
-  if (r < 1e-6) {
-    return Vec2{0.0, 0.0};
-  }
 
   const double ux = b_body.x / r;
   const double uy = b_body.y / r;

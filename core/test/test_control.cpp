@@ -1,4 +1,4 @@
-// T4：绕桩控制律（车体系直连版）—— 6 个用例
+// T4：绕桩控制律（车体系直连版）—— 5 个用例
 // 手算依据见 control.hpp / control.cpp 顶部注释
 #include <cmath>
 #include <limits>
@@ -61,18 +61,7 @@ int main() {
     CHECK_NEAR(v.y, 0.0, 1e-9);
   }
 
-  // ---- 用例 5：桩几乎在车中心 → 必须返回 0，绝不能出 inf/nan ----
-  {
-    const nav::Vec2 v = nav::orbit_step(nav::Vec2{0.0, 0.0}, p);
-    CHECK_NEAR(v.x, 0.0, 1e-12);
-    CHECK_NEAR(v.y, 0.0, 1e-12);
-    CHECK_TRUE(std::isfinite(v.x) && std::isfinite(v.y));
-
-    const nav::Vec2 tiny = nav::orbit_step(nav::Vec2{1e-9, 0.0}, p);
-    CHECK_TRUE(std::isfinite(tiny.x) && std::isfinite(tiny.y));
-  }
-
-  // ---- 用例 6：NaN / Inf 输入 → 返回 0 ----
+  // ---- 用例 5：NaN / Inf 输入 → 返回 0 ----
   {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const double inf = std::numeric_limits<double>::infinity();

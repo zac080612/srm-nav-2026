@@ -25,10 +25,11 @@ struct SmInput {
   double accum_angle{0.0};   // 当前桩的累积绕行角（弧度）
   double dist_to_cross{0.0}; // 到交叉点的距离（米）
   double dist_to_park{0.0};  // 到停车位的距离（米）
+  double orbit_radius{0.55}; // 当前近桩的目标绕行半径（由检测的桩半径动态算出）
 };
 
-// 切换判据：Idle→StraightIn(started)→OrbitDown(|b_near|≤R*1.05)→Cross(绕330°)
-//          →OrbitUp(到交叉点<0.15)→StraightOut(绕330°)→Stop(到停车位<0.15)
+// 切换判据：Idle→StraightIn(started)→OrbitDown(|b_near|≤orbit_radius*1.05)→Cross(绕270°)
+//          →OrbitUp(到交叉点<0.15)→StraightOut(绕270°)→Stop(到停车位<0.15)
 // 累积角要滞回（触发一次后等回零），桩丢失超过阈值降级
 struct StepResult {
   State next{State::Idle};
