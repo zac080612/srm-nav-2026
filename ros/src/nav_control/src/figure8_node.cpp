@@ -47,11 +47,13 @@ class Figure8Node : public rclcpp::Node {
   Figure8Node() : Node("figure8") {
     declare_parameter("park_x", -1.5);
     declare_parameter("park_y", -2.5);
-    declare_parameter("v_lin", 0.10);
+    declare_parameter("v_lin", 0.20);
+    declare_parameter("a_max", 0.20);
 
     park_ = {get_parameter("park_x").as_double(),
              get_parameter("park_y").as_double()};
     v_lin_ = get_parameter("v_lin").as_double();
+    a_max_ = get_parameter("a_max").as_double();
 
     down_.ccw = true;
     up_.ccw = false;
@@ -135,15 +137,35 @@ class Figure8Node : public rclcpp::Node {
     last_bearing_ = bearing;
   }
 
-  // 按状态计算目标车体系速度
-  Vec2 target_velocity(State s, const Vec2& b_near, const Vec2& b_cross,
-                       const Vec2& b_park) const {
+  // 当前状态的目标速度（直行用 v_lin，绕桩用 v_t）
+  double target_speed(State s) const {
     switch (s) {
-      case State::StraightIn:  return scale(unit_vec(b_near), v_lin_);
-      case State::OrbitDown:   return orbit_step(b_near, down_);
-      case State::Cross:       return scale(unit_vec(b_cross), v_lin_);
-      case State::OrbitUp:     return orbit_step(b_near, up_);
-      case State::StraightOut: return scale(unit_vec(b_park), v_lin_);
+      case State::OrbitDown:
+      case State::OrbitUp:      return down_.v_t;
+      case State::StraightIn:
+      case State::Cross:
+      case State::StraightOut:  return v_lin_;
+      default:                  return 0.0;
+    }
+  }
+
+  // 按状态计算目标车体系速度（实际速度经斜坡后传入）
+  Vec2 target_velocity(State s, const Vec2& b_near, const Vec2& b_cross,
+                       const Vec2& b_park, double v_now) const {
+    switch (s) {
+      case State::StraightIn:  return scale(unit_vec(b_near), v_now);
+      case State::OrbitDown: {
+        OrbitParams p = down_;
+        p.v_t = v_now;
+        return orbit_step(b_near, p);
+      }
+      case State::Cross:       return scale(unit_vec(b_cross), v_now);
+      case State::OrbitUp: {
+        OrbitParams p = up_;
+        p.v_t = v_now;
+        return orbit_step(b_near, p);
+      }
+      case State::StraightOut: return scale(unit_vec(b_park), v_now);
       default:                 return {0.0, 0.0};
     }
   }
@@ -175,7 +197,21 @@ class Figure8Node : public rclcpp::Node {
     in.dist_to_park = std::hypot(b_park.x, b_park.y);
     sm_.step(in);
 
-    const Vec2 v = target_velocity(sm_.state(), b_near, b_cross, b_park);
+    // 斜坡：实际速度每帧向目标速度逼近 a_max*dt，避免切换时跳变
+    const double v_target = target_speed(sm_.state());
+    const auto now = this->now();
+    const double dt_raw = last_time_.nanoseconds() > 0
+                              ? (now - last_time_).seconds()
+                              : 0.0;
+    last_time_ = now;
+    const double dt = std::min(dt_raw, 0.1);  // 卡顿后最多按 0.1s 推进，防止突变
+    if (v_now_ < v_target) {
+      v_now_ = std::min(v_target, v_now_ + a_max_ * dt);
+    } else if (v_now_ > v_target) {
+      v_now_ = std::max(v_target, v_now_ - a_max_ * dt);
+    }
+
+    const Vec2 v = target_velocity(sm_.state(), b_near, b_cross, b_park, v_now_);
     const ProtoCmd c = map_body_to_protocol(rbc_, v.x, v.y);
     safe_.update(c.vx, c.vy);
     const UpFrame frame = safe_.tick(seq_++);
@@ -185,13 +221,17 @@ class Figure8Node : public rclcpp::Node {
     pub_->publish(msg);
 
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
-                         "state=%s vx=%.3f vy=%.3f",
-                         nav::to_string(sm_.state()), c.vx, c.vy);
+                         "state=%s v_now=%.3f vx=%.3f vy=%.3f",
+                         nav::to_string(sm_.state()), v_now_, c.vx, c.vy);
   }
 
   Vec2 park_;
-  double v_lin_{0.10};
+  double v_lin_{0.20};
+  double a_max_{0.20};
   OrbitParams down_, up_;
+
+  double v_now_{0.0};
+  rclcpp::Time last_time_;
 
   double car_x_{0.0}, car_y_{0.0}, car_yaw_{0.0};
   bool have_pose_{false};
