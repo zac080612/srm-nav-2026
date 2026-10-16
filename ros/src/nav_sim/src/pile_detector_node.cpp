@@ -16,8 +16,10 @@ using nav::Vec2;
 class PileDetectorNode : public rclcpp::Node {
  public:
   PileDetectorNode() : Node("pile_detector") {
-    declare_parameter("pile_radius", 0.08);
-    params_.pile_radius = get_parameter("pile_radius").as_double();
+    declare_parameter("min_radius", 0.03);
+    declare_parameter("max_radius", 0.30);
+    params_.min_radius = get_parameter("min_radius").as_double();
+    params_.max_radius = get_parameter("max_radius").as_double();
 
     sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
         "/scan", 10, std::bind(&PileDetectorNode::on_scan, this, _1));
@@ -44,19 +46,19 @@ class PileDetectorNode : public rclcpp::Node {
 
     visualization_msgs::msg::MarkerArray arr;
     int id = 0;
-    for (const auto& c : piles) {
+    for (const auto& pl : piles) {
       visualization_msgs::msg::Marker m;
       m.header = msg->header;
       m.ns = "piles";
       m.id = id++;
       m.type = visualization_msgs::msg::Marker::CYLINDER;
       m.action = visualization_msgs::msg::Marker::ADD;
-      m.pose.position.x = c.x;
-      m.pose.position.y = c.y;
+      m.pose.position.x = pl.center.x;
+      m.pose.position.y = pl.center.y;
       m.pose.position.z = 0.5;
       m.pose.orientation.w = 1.0;
-      m.scale.x = 0.16;
-      m.scale.y = 0.16;
+      m.scale.x = 2.0 * pl.radius;
+      m.scale.y = 2.0 * pl.radius;
       m.scale.z = 1.0;
       m.color.r = 1.0;
       m.color.g = 1.0;

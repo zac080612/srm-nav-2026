@@ -1,4 +1,4 @@
-// 桩检测单测：合成桩表面圆弧，验证能找回圆心
+// 桩检测单测：合成圆弧点，验证任意半径圆拟合能找回圆心和半径
 #include <cmath>
 #include <vector>
 
@@ -22,36 +22,54 @@ std::vector<nav::Vec2> arc(const nav::Vec2& center, double r,
 
 int main() {
   nav::PileDetectParams p;
-  p.pile_radius = 0.08;
   p.cluster_dist = 0.15;
   p.min_points = 5;
-  p.fit_tol = 0.02;
+  p.min_radius = 0.03;
+  p.max_radius = 0.30;
 
-  // ---- 两个桩：下桩 (0,-1)、上桩 (0,1)，车在原点 ----
-  // 车在原点，看下桩的上半圆弧（朝车），看上桩的下半圆弧（朝车）
-  std::vector<nav::Vec2> pts;
-  const auto down = arc({0.0, -1.0}, 0.08, 0.0, M_PI, 16);    // 上半圆
-  const auto up = arc({0.0, 1.0}, 0.08, M_PI, 2.0 * M_PI, 16);  // 下半圆
-  pts.insert(pts.end(), down.begin(), down.end());
-  pts.insert(pts.end(), up.begin(), up.end());
-
-  const auto piles = nav::detect_piles(pts, p);
-
-  CHECK_EQ(piles.size(), static_cast<size_t>(2));
-
-  bool found_down = false;
-  bool found_up = false;
-  for (const auto& c : piles) {
-    if (std::hypot(c.x, c.y + 1.0) < 0.02) found_down = true;
-    if (std::hypot(c.x, c.y - 1.0) < 0.02) found_up = true;
+  // ---- 完整圆：验证圆心和半径都准 ----
+  {
+    std::vector<nav::Vec2> pts = arc({0.5, -1.0}, 0.08, 0.0, 2.0 * M_PI, 60);
+    const auto piles = nav::detect_piles(pts, p);
+    CHECK_EQ(piles.size(), static_cast<size_t>(1));
+    if (piles.size() == 1) {
+      CHECK_NEAR(piles[0].center.x, 0.5, 0.01);
+      CHECK_NEAR(piles[0].center.y, -1.0, 0.01);
+      CHECK_NEAR(piles[0].radius, 0.08, 0.01);
+    }
   }
-  CHECK_TRUE(found_down);
-  CHECK_TRUE(found_up);
 
-  // ---- 边界：空点集 → 无桩 ----
+  // ---- 两个桩：下桩 (0,-1)、上桩 (0,1)，半径 0.08，半圆 ----
+  {
+    std::vector<nav::Vec2> pts;
+    const auto down = arc({0.0, -1.0}, 0.08, 0.0, M_PI, 24);      // 上半圆
+    const auto up = arc({0.0, 1.0}, 0.08, M_PI, 2.0 * M_PI, 24);   // 下半圆
+    pts.insert(pts.end(), down.begin(), down.end());
+    pts.insert(pts.end(), up.begin(), up.end());
+
+    const auto piles = nav::detect_piles(pts, p);
+    CHECK_EQ(piles.size(), static_cast<size_t>(2));
+
+    bool found_down = false;
+    bool found_up = false;
+    for (const auto& pl : piles) {
+      if (std::hypot(pl.center.x, pl.center.y + 1.0) < 0.05) found_down = true;
+      if (std::hypot(pl.center.x, pl.center.y - 1.0) < 0.05) found_up = true;
+    }
+    CHECK_TRUE(found_down);
+    CHECK_TRUE(found_up);
+  }
+
+  // ---- 半径超范围 → 不算桩 ----
+  {
+    std::vector<nav::Vec2> pts = arc({0.5, -1.0}, 0.5, 0.0, 2.0 * M_PI, 60);  // 半径 0.5 > 0.3
+    CHECK_EQ(nav::detect_piles(pts, p).size(), static_cast<size_t>(0));
+  }
+
+  // ---- 空点集 → 无桩 ----
   CHECK_EQ(nav::detect_piles({}, p).size(), static_cast<size_t>(0));
 
-  // ---- 边界：点数不足 → 无桩 ----
+  // ---- 点数不足 → 无桩 ----
   {
     std::vector<nav::Vec2> few = {{0.1, 0.0}, {0.2, 0.0}};
     CHECK_EQ(nav::detect_piles(few, p).size(), static_cast<size_t>(0));

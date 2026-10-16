@@ -84,21 +84,24 @@ class Figure8Node : public rclcpp::Node {
     have_pose_ = true;
   }
 
-  // 桩在车体系的位置，按 y 排序分下桩/上桩
+  // 桩位置转世界坐标，按世界 y 区分下桩/上桩
   void on_piles(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
     if (msg->markers.size() < 2) {
       have_piles_ = false;
       return;
     }
-    std::vector<Vec2> piles;
+    const double c = std::cos(car_yaw_);
+    const double s = std::sin(car_yaw_);
+    std::vector<Vec2> world;
     for (const auto& m : msg->markers) {
-      piles.push_back({m.pose.position.x, m.pose.position.y});
+      const double bx = m.pose.position.x;
+      const double by = m.pose.position.y;
+      world.push_back({car_x_ + c * bx - s * by, car_y_ + s * bx + c * by});
     }
-    // 按 y 排序，取最小（下桩）和最大（上桩）
-    std::sort(piles.begin(), piles.end(),
+    std::sort(world.begin(), world.end(),
               [](const Vec2& a, const Vec2& b) { return a.y < b.y; });
-    b_down_ = piles.front();
-    b_up_ = piles.back();
+    b_down_ = to_body(world.front().x, world.front().y);
+    b_up_ = to_body(world.back().x, world.back().y);
     have_piles_ = true;
   }
 
