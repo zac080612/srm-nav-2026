@@ -28,9 +28,11 @@ struct SmInput {
   double orbit_radius{0.55}; // 当前近桩的目标绕行半径（由检测的桩半径动态算出）
 };
 
-// 切换判据：Idle→StraightIn(started)→OrbitDown(|b_near|≤orbit_radius*1.05)→Cross(绕270°)
-//          →OrbitUp(到交叉点<0.15)→StraightOut(绕270°)→Stop(到停车位<0.15)
-// 累积角要滞回（触发一次后等回零），桩丢失超过阈值降级
+// 切换判据：Idle→StraightIn(started)→OrbitDown(|b_near|≤orbit_radius*1.05)
+//          →Cross(车绕到桩的交叉点侧)→OrbitUp(到交叉点<0.15)
+//          →StraightOut(车绕到桩的交叉点侧)→Stop(到停车位<0.15)
+// 绕桩出点用「车、桩、交叉点共线」几何判据，自适应入点位置，不写死角度。
+// 桩丢失超过阈值降级。
 struct StepResult {
   State next{State::Idle};
   bool degraded{false};   // true = 本帧处于降级（桩丢失）
@@ -44,8 +46,8 @@ class StateMachine {
 
  private:
   State state_{State::Idle};
-  bool angle_consumed_{false};   // 累积角是否已经用掉（滞回用）
-  int missing_frames_{0};        // 连续丢桩帧数（降级判定用）
+  bool passed_outside_{false};    // 车是否已绕过桩的"远离交叉点"侧（防止入点误判）
+  int missing_frames_{0};         // 连续丢桩帧数（降级判定用）
 };
 
 }  // namespace nav

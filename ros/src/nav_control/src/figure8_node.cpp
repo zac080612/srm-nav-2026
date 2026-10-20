@@ -5,6 +5,7 @@
 
 #include <nav/control.hpp>
 #include <nav/frame.hpp>
+#include <nav/pile_frame.hpp>
 #include <nav/rbc_map.hpp>
 #include <nav/safe_cmd.hpp>
 #include <nav/state_machine.hpp>
@@ -24,8 +25,10 @@ using nav::State;
 using nav::StateMachine;
 using nav::UpFrame;
 using nav::Vec2;
+using nav::car_in_pile_frame;
 using nav::map_body_to_protocol;
 using nav::orbit_step;
+using nav::to_park_body;
 
 namespace {
 
@@ -52,6 +55,8 @@ class Figure8Node : public rclcpp::Node {
     declare_parameter("park_y", -2.5);
     declare_parameter("v_lin", 0.20);
     declare_parameter("a_max", 0.20);
+    declare_parameter("v_t", 0.10);
+    declare_parameter("k_r", 0.30);
 
     park_ = {get_parameter("park_x").as_double(),
              get_parameter("park_y").as_double()};
@@ -60,8 +65,10 @@ class Figure8Node : public rclcpp::Node {
 
     down_.ccw = true;
     up_.ccw = false;
-    down_.v_t = 0.08;
-    up_.v_t = 0.08;
+    down_.v_t = get_parameter("v_t").as_double();
+    up_.v_t = get_parameter("v_t").as_double();
+    down_.k_r = get_parameter("k_r").as_double();
+    up_.k_r = get_parameter("k_r").as_double();
 
     rbc_.m[0][0] = 0.0; rbc_.m[0][1] = 1.0;
     rbc_.m[1][0] = -1.0; rbc_.m[1][1] = 0.0;
@@ -114,6 +121,15 @@ class Figure8Node : public rclcpp::Node {
     down_.R = world.front().radius + kCarRadius + kMargin;
     up_.R = world.back().radius + kCarRadius + kMargin;
     have_piles_ = true;
+
+    // 启动时车停在停车位，第一次看到两桩就把"停车位在桩系的坐标"标定下来。
+    // 之后返程朝这个坐标走，全程不用里程计。
+    if (!park_calibrated_) {
+      p_park_ = car_in_pile_frame(b_down_, b_up_);
+      park_calibrated_ = true;
+      RCLCPP_INFO(get_logger(), "已标定停车位（桩系）: (%.3f, %.3f)",
+                  p_park_.x, p_park_.y);
+    }
   }
 
   // 世界坐标 → 车体系
@@ -184,7 +200,9 @@ class Figure8Node : public rclcpp::Node {
 
     const Vec2 b_cross = {(b_down_.x + b_up_.x) * 0.5,
                           (b_down_.y + b_up_.y) * 0.5};
-    const Vec2 b_park = to_body(park_.x, park_.y);
+    // 返程目标：停车位在桩系的坐标（启动时已标定），转成车体系方向。
+    // 桩系定位不需要里程计，两桩在就可靠。
+    const Vec2 b_park = to_park_body(b_down_, b_up_, p_park_);
 
     const State cur = sm_.state();
     const bool near_is_up = (cur == State::OrbitUp);
@@ -236,6 +254,8 @@ class Figure8Node : public rclcpp::Node {
   }
 
   Vec2 park_;
+  Vec2 p_park_{0.0, 0.0};       // 停车位在桩系的坐标（启动时标定）
+  bool park_calibrated_{false}; // 是否已标定停车位
   double v_lin_{0.20};
   double a_max_{0.20};
   OrbitParams down_, up_;

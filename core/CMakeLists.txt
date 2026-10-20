@@ -25,6 +25,7 @@ add_library(nav_core STATIC
   src/state_machine.cpp
   src/calib.cpp
   src/pile_detect.cpp
+  src/pile_frame.cpp
 )
 target_include_directories(nav_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -53,6 +54,7 @@ set(NAV_TESTS
   test_state_machine
   test_calib
   test_pile_detect
+  test_pile_frame
 )
 
 foreach(t ${NAV_TESTS})

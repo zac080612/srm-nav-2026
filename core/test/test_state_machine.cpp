@@ -1,5 +1,4 @@
-// T5：状态机离线测试 —— 不需要 Gazebo、不需要实车
-// 阈值依据：state_machine.hpp 顶部注释（270 度 ≈ 4.71 rad；交叉点/停车位判定 0.15 m）
+// T5：状态机离线测试 —— 绕桩出点用「车、桩、交叉点共线」几何判据（自适应，不写死角度）
 #include <cmath>
 
 #include "nav/state_machine.hpp"
@@ -8,16 +7,13 @@
 
 namespace {
 
-// 越过"绕满一圈"的累积角（弧度）。270 度 ≈ 4.71 rad，这里给到 6.0 rad 留余量，
-// 避免实现里用 >/>= 的细微差别把测试搞红。
-constexpr double kPastOneTurn = 6.0;
-
+// 构造一帧输入。默认：已发令、看到两桩、还没到交叉点/停车位。
 nav::SmInput base_input() {
   nav::SmInput in;
   in.started = true;
   in.have_piles = true;
-  in.b_near = nav::Vec2{0.55, 0.0};   // 正好贴在目标半径上
-  in.b_far = nav::Vec2{-0.55, 0.0};
+  in.b_near = nav::Vec2{0.0, 0.55};   // 近桩在车上方 0.55m
+  in.b_far = nav::Vec2{0.0, 2.55};    // 远桩在更上方（桩间距 2m）
   in.accum_angle = 0.0;
   in.dist_to_cross = 5.0;
   in.dist_to_park = 5.0;
@@ -27,118 +23,122 @@ nav::SmInput base_input() {
 }  // namespace
 
 int main() {
-  // ================= 1) 完整一圈的状态序列 =================
+  // ============ 1) 绕下桩：入点(外侧)不触发，绕到出点(交叉点侧)才切 Cross ============
+  {
+    nav::StateMachine sm;
+    nav::SmInput in = base_input();
+    sm.step(in);                       // Idle -> StraightIn -> OrbitDown（连跳）
+    CHECK_TRUE(sm.state() == nav::State::OrbitDown);
+
+    // 入点：车在下桩下方，车→下桩 与 车→交叉点 同向（外侧）→ 记录 passed_outside，不切
+    in.b_near = nav::Vec2{0.0, 0.55};   // 下桩在车上方
+    in.b_far = nav::Vec2{0.0, 2.55};    // 上桩在更上方
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::OrbitDown);
+
+    // 出点：车绕到下桩上方，车→下桩 与 车→交叉点 反向 → 切 Cross
+    in.b_near = nav::Vec2{0.0, -0.55};  // 下桩在车下方
+    in.b_far = nav::Vec2{0.0, 1.45};    // 上桩在车上方
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::Cross);
+  }
+
+  // ============ 2) 绕上桩：入点就在交叉点附近（无法判断），不能误切 ============
+  {
+    nav::StateMachine sm;
+    nav::SmInput in = base_input();
+    sm.step(in);                       // -> OrbitDown
+    in.b_near = nav::Vec2{0.0, -0.55};  // 绕到下桩上方
+    in.b_far = nav::Vec2{0.0, 1.45};
+    sm.step(in);                       // -> Cross
+    in.dist_to_cross = 0.10;            // 到交叉点
+    sm.step(in);                       // -> OrbitUp
+    CHECK_TRUE(sm.state() == nav::State::OrbitUp);
+
+    // 入点：车就在交叉点（两桩中点），车→交叉点 长度≈0，判据失效（-1）
+    // 必须不改变 passed_outside_，更不能切 StraightOut。
+    in.b_near = nav::Vec2{0.0, 1.00};   // 上桩在车上方 1m
+    in.b_far = nav::Vec2{0.0, -1.00};   // 下桩在车下方 1m（交叉点=车位置）
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::OrbitUp);
+
+    // 绕到上桩上方（外侧）：车→上桩 与 车→交叉点 同向 → passed_outside_ = true
+    in.b_near = nav::Vec2{0.0, -0.55};  // 上桩在车下方
+    in.b_far = nav::Vec2{0.0, -2.55};   // 下桩在更下方
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::OrbitUp);
+
+    // 绕回上桩下方（交叉点侧）：反向，且已绕过外侧 → 切 StraightOut
+    in.b_near = nav::Vec2{0.0, 0.55};   // 上桩在车上方
+    in.b_far = nav::Vec2{0.0, -1.45};   // 下桩在车下方
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::StraightOut);
+  }
+
+  // ============ 3) 完整序列到 Stop ============
   {
     nav::StateMachine sm;
     CHECK_TRUE(sm.state() == nav::State::Idle);
 
-    // 未发令 → 保持 Idle
-    {
-      nav::SmInput in = base_input();
-      in.started = false;
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::Idle);
-    }
-
-    // 发令 → StraightIn
-    {
-      nav::SmInput in = base_input();
-      in.b_near = nav::Vec2{3.0, 0.0};   // 还离得很远
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::StraightIn);
-    }
-
-    // 进入圆上入点 → OrbitDown
-    {
-      nav::SmInput in = base_input();
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::OrbitDown);
-    }
-
-    // 累积角过阈值 → Cross
-    {
-      nav::SmInput in = base_input();
-      in.accum_angle = kPastOneTurn;
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::Cross);
-    }
-
-    // 到交叉点 → OrbitUp
-    {
-      nav::SmInput in = base_input();
-      in.dist_to_cross = 0.10;
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::OrbitUp);
-    }
-
-    // 上瓣也绕满一圈 → StraightOut
-    {
-      nav::SmInput in = base_input();
-      in.accum_angle = kPastOneTurn;
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::StraightOut);
-    }
-
-    // 回到停车位 → Stop
-    {
-      nav::SmInput in = base_input();
-      in.dist_to_park = 0.10;
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::Stop);
-    }
-
-    // Stop 是稳态：继续喂输入不应跳回别的状态
-    {
-      nav::SmInput in = base_input();
-      in.accum_angle = 0.0;
-      in.dist_to_park = 0.05;
-      sm.step(in);
-      CHECK_TRUE(sm.state() == nav::State::Stop);
-    }
-  }
-
-  // ================= 2) "恰好触发一次"：累积角在阈值附近抖动不能来回跳 =================
-  {
-    nav::StateMachine sm;
     nav::SmInput in = base_input();
-    sm.step(in);                      // -> OrbitDown
-    in.b_near = nav::Vec2{3.0, 0.0};
-    sm.step(in);                      // 保持（已经不在 StraightIn 的判据里）
-
-    // 第一次越过阈值：进入 Cross
-    in.accum_angle = kPastOneTurn;
+    in.started = false;
     sm.step(in);
-    const nav::State s1 = sm.state();
+    CHECK_TRUE(sm.state() == nav::State::Idle);   // 未发令保持 Idle
 
-    // 之后即使累积角继续略高于阈值，也不应再触发一次（应停在 Cross 或已推进）
-    for (int i = 0; i < 5; ++i) {
-      in.accum_angle = kPastOneTurn + 0.1 * (i + 1);
-      sm.step(in);
-    }
-    const nav::State s2 = sm.state();
-    // 允许推进到 Cross（尚未到交叉点），但**不允许**因为抖动回到 OrbitDown
-    CHECK_TRUE(s1 == nav::State::Cross);
-    CHECK_TRUE(s2 == nav::State::Cross || s2 == nav::State::OrbitUp);
+    in.started = true;
+    in.b_near = nav::Vec2{3.0, 0.0};              // 桩还远
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::StraightIn);
+
+    in.b_near = nav::Vec2{0.0, 0.55};             // 到入点
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::OrbitDown);
+
+    in.b_near = nav::Vec2{0.0, -0.55};            // 绕到下桩上方
+    in.b_far = nav::Vec2{0.0, 1.45};
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::Cross);
+
+    in.dist_to_cross = 0.10;                      // 到交叉点
+    in.b_near = nav::Vec2{0.0, 1.00};
+    in.b_far = nav::Vec2{0.0, -1.00};
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::OrbitUp);
+
+    in.b_near = nav::Vec2{0.0, -0.55};            // 绕到上桩上方
+    in.b_far = nav::Vec2{0.0, -2.55};
+    sm.step(in);
+    in.b_near = nav::Vec2{0.0, 0.55};             // 绕回上桩下方
+    in.b_far = nav::Vec2{0.0, -1.45};
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::StraightOut);
+
+    in.dist_to_park = 0.10;                       // 到停车位
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::Stop);
+
+    in.dist_to_park = 0.05;                       // Stop 是稳态
+    sm.step(in);
+    CHECK_TRUE(sm.state() == nav::State::Stop);
   }
 
-  // ================= 3) 桩丢失 → 降级 =================
+  // ============ 4) 桩丢失 → 降级 ============
   {
     nav::StateMachine sm;
     nav::SmInput in = base_input();
-    sm.step(in);                      // OrbitDown
+    sm.step(in);                       // OrbitDown
     in.have_piles = false;
 
     bool degraded_seen = false;
-    for (int i = 0; i < 30; ++i) {    // 30 帧（约 1 s @30Hz）足够超过降级阈值
+    for (int i = 0; i < 30; ++i) {
       const nav::StepResult r = sm.step(in);
       if (r.degraded) degraded_seen = true;
     }
     CHECK_TRUE(degraded_seen);
-    // 降级期间不应自己跳到后面的状态
     CHECK_TRUE(sm.state() == nav::State::OrbitDown || sm.state() == nav::State::Cross);
   }
 
-  // ================= 4) reset 能回到初始状态 =================
+  // ============ 5) reset 回到初始状态 ============
   {
     nav::StateMachine sm;
     nav::SmInput in = base_input();
@@ -147,28 +147,6 @@ int main() {
     CHECK_TRUE(sm.state() != nav::State::Idle);
     sm.reset();
     CHECK_TRUE(sm.state() == nav::State::Idle);
-  }
-
-  // ================= 5) 换桩连跳不误触发（回归）=================
-  // 绕完下桩的同一帧恰好到交叉点：OrbitDown -> Cross -> OrbitUp 连跳，
-  // 但 OrbitUp 不能沿用下桩的旧 accum_angle 直接跳到 StraightOut。
-  {
-    nav::StateMachine sm;
-    nav::SmInput in = base_input();
-    sm.step(in);   // -> OrbitDown
-
-    in.accum_angle = kPastOneTurn;   // 绕下桩满一圈
-    in.dist_to_cross = 0.10;         // 已到交叉点
-    sm.step(in);
-    CHECK_TRUE(sm.state() == nav::State::OrbitUp);   // 必须停在 OrbitUp
-
-    in.accum_angle = 0.0;   // figure8 换桩后重置累积角
-    sm.step(in);
-    CHECK_TRUE(sm.state() == nav::State::OrbitUp);   // 仍 OrbitUp，重新累积
-
-    in.accum_angle = kPastOneTurn;   // 绕上桩也满一圈
-    sm.step(in);
-    CHECK_TRUE(sm.state() == nav::State::StraightOut);  // 这时才回去
   }
 
   return navtest::summary("test_state_machine");

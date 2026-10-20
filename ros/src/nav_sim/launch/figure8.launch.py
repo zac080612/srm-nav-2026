@@ -50,6 +50,10 @@ def generate_launch_description():
         parameters=[{
             "park_x": -1.5,
             "park_y": -2.5,
+            "v_lin": 0.20,
+            "a_max": 0.20,
+            "v_t": 0.10,
+            "k_r": 0.30,
         }],
     )
 
