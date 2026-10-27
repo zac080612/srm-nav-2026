@@ -1,4 +1,4 @@
-// T5：状态机离线测试 —— 绕桩出点用「车、桩、交叉点共线」几何判据（自适应，不写死角度）
+// T5：状态机离线测试 —— 绕桩出点 = 车、桩、交叉点三点共线（夹角>148°）几何判据
 #include <cmath>
 
 #include "nav/state_machine.hpp"
@@ -23,7 +23,7 @@ nav::SmInput base_input() {
 }  // namespace
 
 int main() {
-  // ============ 1) 绕下桩：入点(外侧)不触发，绕到出点(交叉点侧)才切 Cross ============
+  // ============ 1) 绕下桩：外侧不切，绕到三点共线才切 Cross ============
   {
     nav::StateMachine sm;
     nav::SmInput in = base_input();
@@ -36,7 +36,7 @@ int main() {
     sm.step(in);
     CHECK_TRUE(sm.state() == nav::State::OrbitDown);
 
-    // 出点：车绕到下桩上方，车→下桩 与 车→交叉点 反向 → 切 Cross
+    // 出点：车绕到下桩上方，车→下桩 与 车→交叉点 反向（夹角180°>148°）→ 切 Cross
     in.b_near = nav::Vec2{0.0, -0.55};  // 下桩在车下方
     in.b_far = nav::Vec2{0.0, 1.45};    // 上桩在车上方
     sm.step(in);
@@ -55,8 +55,7 @@ int main() {
     sm.step(in);                       // -> OrbitUp
     CHECK_TRUE(sm.state() == nav::State::OrbitUp);
 
-    // 入点：车就在交叉点（两桩中点），车→交叉点 长度≈0，判据失效（-1）
-    // 必须不改变 passed_outside_，更不能切 StraightOut。
+    // 入点：车就在交叉点（两桩中点），车→交叉点 长度≈0，判据失效（-1），不能切
     in.b_near = nav::Vec2{0.0, 1.00};   // 上桩在车上方 1m
     in.b_far = nav::Vec2{0.0, -1.00};   // 下桩在车下方 1m（交叉点=车位置）
     sm.step(in);

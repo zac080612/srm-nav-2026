@@ -8,7 +8,7 @@ namespace {
 
 constexpr double kArriveDist = 0.15;
 constexpr int kMissingLimit = 15;
-constexpr double kExitCos = -0.5;   // 出点判据：夹角 > 120° 时认为"车已绕到桩的交叉点侧"
+constexpr double kExitCos = -0.85;  // 出点判据：夹角 > 148° 时认为"车、桩、交叉点已共线"
 constexpr double kCrossNearDist = 0.30;  // 车离交叉点比这个近时，方向无法可靠判断
 
 // 判断车相对桩的位置状态：
@@ -78,7 +78,8 @@ StepResult StateMachine::step(const SmInput& in) {
       case State::OrbitDown: {
         const int s = cross_side_status(in.b_near, in.b_far);
         if (s == 0) passed_outside_ = true;    // 在外侧：记录"已绕过外侧"
-        if (s == 1 && passed_outside_) {       // 回到交叉点侧，且绕过外侧 → 切出
+        // 出点：几何上三点共线（交叉点侧）且已经过外侧，即切出
+        if (s == 1 && passed_outside_) {
           passed_outside_ = false;
           state_ = State::Cross;
           advanced = true;

@@ -50,12 +50,26 @@ def generate_launch_description():
         parameters=[{
             "park_x": -1.5,
             "park_y": -2.5,
-            "v_lin": 0.20,
-            "a_max": 0.20,
-            "v_t": 0.10,
-            "k_r": 0.30,
+            "v_lin": 0.7,
+            "a_max": 1.0,
+            "v_t": 0.7,
+            "k_r": 0.8,
+            "speed_limit": 1.5,
+            "speed_scale": 1.0,
+            "auto_start": True,
         }],
     )
+
+    # 真实串口后端（默认注释，上车才启用）：
+    # serial = Node(
+    #     package="nav_protocol",
+    #     executable="serial_node",
+    #     output="screen",
+    #     parameters=[{
+    #         "device": "/dev/ttyACM0",
+    #         "baud": 115200,
+    #     }],
+    # )
 
     rviz = Node(
         package="rviz2",

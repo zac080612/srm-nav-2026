@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -73,12 +74,27 @@ class SerialNode : public rclcpp::Node {
   void on_frame(const std_msgs::msg::UInt8MultiArray::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(mutex_);
     latest_frame_ = msg->data;
+    last_rx_ = std::chrono::steady_clock::now();
   }
 
+  // 定时发帧；超过 500ms 没收到新帧就发零速，防止上游节点崩溃后车一直跑
   void on_send_timer() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (fd_ < 0 || latest_frame_.size() != nav::kUpFrameLen) return;
-    if (::write(fd_, latest_frame_.data(), latest_frame_.size()) < 0)
+    if (fd_ < 0) return;
+
+    const double age = std::chrono::duration<double>(
+                           std::chrono::steady_clock::now() - last_rx_).count();
+    const bool fresh = latest_frame_.size() == nav::kUpFrameLen && age < 0.5;
+
+    std::vector<uint8_t> frame;
+    if (fresh) {
+      frame = latest_frame_;
+    } else {
+      const nav::UpFrame zero = nav::pack_velocity_frame(seq_++, 0.0f, 0.0f, 0.0f);
+      frame.assign(zero.begin(), zero.end());
+    }
+
+    if (::write(fd_, frame.data(), frame.size()) < 0)
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "串口写失败");
   }
 
@@ -102,6 +118,8 @@ class SerialNode : public rclcpp::Node {
   int fd_{-1};
   nav::DownParser parser_;
   std::vector<uint8_t> latest_frame_;
+  std::chrono::steady_clock::time_point last_rx_{};
+  uint8_t seq_{0};
   std::mutex mutex_;
   std::thread recv_thread_;
   bool running_{true};

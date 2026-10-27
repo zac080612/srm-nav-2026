@@ -29,9 +29,10 @@ struct SmInput {
 };
 
 // 切换判据：Idle→StraightIn(started)→OrbitDown(|b_near|≤orbit_radius*1.05)
-//          →Cross(车绕到桩的交叉点侧)→OrbitUp(到交叉点<0.15)
-//          →StraightOut(车绕到桩的交叉点侧)→Stop(到停车位<0.15)
-// 绕桩出点用「车、桩、交叉点共线」几何判据，自适应入点位置，不写死角度。
+//          →Cross(车、桩、交叉点三点共线)→OrbitUp(到交叉点<0.15)
+//          →StraightOut(车、桩、交叉点三点共线)→Stop(到停车位<0.15)
+// 绕桩出点用「车、桩、交叉点共线」几何判据（夹角>148°），
+// 配合 passed_outside_ 滞回保证先绕过外侧再切出，自适应入点、不写死角度。
 // 桩丢失超过阈值降级。
 struct StepResult {
   State next{State::Idle};
