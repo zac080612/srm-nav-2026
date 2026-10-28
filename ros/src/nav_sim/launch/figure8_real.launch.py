@@ -23,16 +23,23 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "cloud_topic": LaunchConfiguration("cloud_topic"),
-            # 高度切片：桩的高度范围（地面以上）。上车按桩实际高度调。
-            "min_height": 0.10,
-            "max_height": 1.50,
+            # 实车实测：雷达离地 0.2m。tf_z 把点云 z 抬到地面坐标系。
+            "tf_z": LaunchConfiguration("tf_z"),
+            # 桩下半部是半径 10cm 的半圆（高约 10cm）。高度切片只保留这一段：
+            # 地面上方 0.02~0.15，既排除地面，也把 1cm 细杆和偏高的杂物切掉。
+            "min_height": LaunchConfiguration("min_height"),
+            "max_height": LaunchConfiguration("max_height"),
             "min_range": 0.30,
-            "max_range": 6.00,
-            "voxel": 0.05,
-            # 雷达相对车体（livox_frame → base_link）的平面变换，实测后填
+            "max_range": LaunchConfiguration("max_range"),
+            "voxel": LaunchConfiguration("voxel"),
+            # 半径范围按半圆实测收紧：只认半径 10cm 左右的圆
+            "min_radius": LaunchConfiguration("min_radius"),
+            "max_radius": LaunchConfiguration("max_radius"),
+            "min_points": LaunchConfiguration("min_points"),
+            "cluster_dist": LaunchConfiguration("cluster_dist"),
+            # 雷达相对车体的平面变换，实测后填
             "tf_x": 0.0,
             "tf_y": 0.0,
-            "tf_z": 0.0,
             "tf_yaw": 0.0,
         }],
     )
@@ -84,6 +91,22 @@ def generate_launch_description():
                               description="串口设备（建议用 /dev/serial/by-id/... 稳定路径）"),
         DeclareLaunchArgument("baud", default_value="115200"),
         DeclareLaunchArgument("cloud_topic", default_value="/livox/lidar"),
+        # ---- 感知：按实车实测值设默认（雷达离地 0.2m，桩半圆半径 10cm）----
+        DeclareLaunchArgument("tf_z", default_value="0.20",
+                              description="雷达离地高度(m)，把点云 z 抬到地面系"),
+        DeclareLaunchArgument("min_height", default_value="0.02",
+                              description="高度切片下限(m，地面系)：略高于地面，排除地面点"),
+        DeclareLaunchArgument("max_height", default_value="0.15",
+                              description="高度切片上限(m，地面系)：桩半圆高约 0.10，留余量"),
+        DeclareLaunchArgument("max_range", default_value="4.0",
+                              description="只看场地内的距离(m)"),
+        DeclareLaunchArgument("voxel", default_value="0.04"),
+        DeclareLaunchArgument("min_radius", default_value="0.10",
+                              description="桩半径下限(m)：半圆实测 0.10"),
+        DeclareLaunchArgument("max_radius", default_value="0.20",
+                              description="桩半径上限(m)"),
+        DeclareLaunchArgument("min_points", default_value="5"),
+        DeclareLaunchArgument("cluster_dist", default_value="0.15"),
         DeclareLaunchArgument("park_x", default_value="-1.5"),
         DeclareLaunchArgument("park_y", default_value="-2.5"),
         DeclareLaunchArgument("v_lin", default_value="0.20"),

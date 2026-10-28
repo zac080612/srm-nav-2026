@@ -39,6 +39,12 @@ class PerceptionNode : public rclcpp::Node {
     declare_parameter("tf_z", 0.0);
     declare_parameter("tf_yaw", 0.0);
     declare_parameter("cloud_topic", "/livox/lidar");
+    // 桩几何：下半部是半径 10cm 的半圆（高约 10cm），上半部是半径 1cm 细杆。
+    // 2D 截面主要靠半圆识别，半径范围按实测收紧，细杆拟合不出圆正好被排除。
+    declare_parameter("min_radius", 0.10);
+    declare_parameter("max_radius", 0.20);
+    declare_parameter("min_points", 5);
+    declare_parameter("cluster_dist", 0.15);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
@@ -50,6 +56,11 @@ class PerceptionNode : public rclcpp::Node {
     tf_z_ = get_parameter("tf_z").as_double();
     tf_yaw_ = get_parameter("tf_yaw").as_double();
     const std::string topic = get_parameter("cloud_topic").as_string();
+
+    params_.min_radius = get_parameter("min_radius").as_double();
+    params_.max_radius = get_parameter("max_radius").as_double();
+    params_.min_points = static_cast<size_t>(get_parameter("min_points").as_int());
+    params_.cluster_dist = get_parameter("cluster_dist").as_double();
 
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         topic, rclcpp::SensorDataQoS(),
