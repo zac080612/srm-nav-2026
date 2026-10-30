@@ -25,9 +25,10 @@ using nav::Vec2;
 class PerceptionNode : public rclcpp::Node {
  public:
   PerceptionNode() : Node("perception") {
-    // 高度切片：只保留地面以上这一段（桩的高度范围），去掉地面和天花板
-    declare_parameter("min_height", 0.10);
-    declare_parameter("max_height", 1.50);
+    // 高度切片：只保留地面以上这一段（桩的高度范围），去掉地面和天花板。
+    // 实车放宽：下限负余量（tf_z 有误差）、上限覆盖半圆+细杆下部。
+    declare_parameter("min_height", -0.05);
+    declare_parameter("max_height", 0.30);
     // 距离过滤：太近是自己车体，太远是墙/杂物
     declare_parameter("min_range", 0.30);
     declare_parameter("max_range", 6.00);
@@ -40,16 +41,13 @@ class PerceptionNode : public rclcpp::Node {
     declare_parameter("tf_yaw", 0.0);
     declare_parameter("cloud_topic", "/livox/lidar");
     // 桩几何：下半部是半径 10cm 的半圆（高约 10cm），上半部是半径 1cm 细杆。
-    // 2D 截面主要靠半圆识别，半径范围按实测收紧，细杆拟合不出圆正好被排除。
-    declare_parameter("min_radius", 0.10);
-    declare_parameter("max_radius", 0.20);
-    declare_parameter("min_points", 5);
-    declare_parameter("cluster_dist", 0.15);
-    // 圆形验证：残差过大或弧长不够的簇丢掉，排除墙/桌沿这类"一段弧"杂物。
-    // 弧长阈值放低到 30°：实车桩（10cm 半球）在点云里的弧覆盖随距离/角度波动，
-    // 60° 会偶发把真桩滤掉（检测数跳到 0）。
-    declare_parameter("max_fit_rms", 0.02);
-    declare_parameter("min_arc_deg", 30.0);
+    // 半径放宽（拟合误差+距离变化），弧长检查先关（点云视角下弧覆盖不稳定）。
+    declare_parameter("min_radius", 0.05);
+    declare_parameter("max_radius", 0.35);
+    declare_parameter("min_points", 3);
+    declare_parameter("cluster_dist", 0.20);
+    declare_parameter("max_fit_rms", 0.06);
+    declare_parameter("min_arc_deg", 0.0);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
