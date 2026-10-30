@@ -26,8 +26,8 @@ class PerceptionNode : public rclcpp::Node {
  public:
   PerceptionNode() : Node("perception") {
     // 高度切片：只保留地面以上这一段（桩的高度范围），去掉地面和天花板。
-    // 实车放宽：下限负余量（tf_z 有误差）、上限覆盖半圆+细杆下部。
-    declare_parameter("min_height", -0.05);
+    // 实车：下限负余量（tf_z 有误差）、上限覆盖半圆(高约0.10)。
+    declare_parameter("min_height", -0.10);
     declare_parameter("max_height", 0.30);
     // 距离过滤：太近是自己车体，太远是墙/杂物
     declare_parameter("min_range", 0.30);
@@ -40,10 +40,10 @@ class PerceptionNode : public rclcpp::Node {
     declare_parameter("tf_z", 0.0);
     declare_parameter("tf_yaw", 0.0);
     declare_parameter("cloud_topic", "/livox/lidar");
-    // 桩几何：下半部是半径 10cm 的半圆（高约 10cm），上半部是半径 1cm 细杆。
-    // 半径放宽（拟合误差+距离变化），弧长检查先关（点云视角下弧覆盖不稳定）。
-    declare_parameter("min_radius", 0.05);
-    declare_parameter("max_radius", 0.35);
+    // 桩几何：下半部半径约 10cm 的半圆（高约 10cm），上半部半径 1cm 细杆。
+    // 半径 0.085~0.15 包住真桩留拟合余量；赛场干净，弧长检查关闭、残差放宽。
+    declare_parameter("min_radius", 0.085);
+    declare_parameter("max_radius", 0.15);
     declare_parameter("min_points", 3);
     declare_parameter("cluster_dist", 0.20);
     declare_parameter("max_fit_rms", 0.06);
