@@ -105,11 +105,23 @@ class SerialNode : public rclcpp::Node {
       const ssize_t n = ::read(fd_, buf, sizeof(buf));
       if (n <= 0) continue;
       const auto frames = parser_.feed(buf, static_cast<size_t>(n));
+      recv_bytes_ += static_cast<size_t>(n);
+      recv_frames_ += frames.size();
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_recv_log_ > std::chrono::seconds(2)) {
+        last_recv_log_ = now;
+        RCLCPP_INFO(get_logger(),
+                    "串口接收：累计 %zu 字节 %zu 帧 crc8错=%zu crc16错=%zu",
+                    recv_bytes_, recv_frames_,
+                    parser_.crc8_errors(), parser_.crc16_errors());
+      }
       for (const auto& f : frames) {
         if (f.cmd_id == nav::kCmdGameStatus && f.data.size() >= nav::kGameStatusLen) {
           std_msgs::msg::UInt8 m;
           m.data = nav::game_progress_of(f.data[0]);
           pub_progress_->publish(m);
+          RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+                               "发布 game_progress=%u", m.data);
         }
       }
     }
@@ -119,6 +131,9 @@ class SerialNode : public rclcpp::Node {
   nav::DownParser parser_;
   std::vector<uint8_t> latest_frame_;
   std::chrono::steady_clock::time_point last_rx_{};
+  std::chrono::steady_clock::time_point last_recv_log_{};
+  size_t recv_bytes_{0};
+  size_t recv_frames_{0};
   uint8_t seq_{0};
   std::mutex mutex_;
   std::thread recv_thread_;
