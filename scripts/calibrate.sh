@@ -2,11 +2,11 @@
 # 一键标定 R_bc 和 speed_scale：清进程 → 找串口 → 起雷达 → 起串口 → 跑标定
 # 用法：bash scripts/calibrate.sh [串口设备] [v_test] [pulse_ms] [tf_yaw]
 #   串口设备留空 = 自动用 /dev/serial/by-id/ 下第一个
-#   v_test 默认 1.2（满杆≈2m/s 时约 0.6m/s）；pulse_ms 默认 800（位移约 50cm）
+#   v_test 默认 1.0（满杆≈2m/s 时约 0.5m/s）；pulse_ms 默认 800（位移约 40cm）
 #   tf_yaw 默认 -1.5708（-90°：雷达相对车体安装角，按肉眼实测方向与点云方向的差确定）
 set -u
 DEV="${1:-}"
-V_TEST="${2:-1.2}"
+V_TEST="${2:-1.0}"
 PULSE_MS="${3:-800}"
 TF_YAW="${4:--1.5708}"
 
