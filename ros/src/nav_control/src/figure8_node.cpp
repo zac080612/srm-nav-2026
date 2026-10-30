@@ -143,58 +143,49 @@ class Figure8Node : public rclcpp::Node {
   }
 
   // 处理桩检测结果。桩在场地里固定不动，所以锁「世界坐标」最可靠：
-  // 世界坐标不随车动，障碍圆柱只要不叠在桩上，就能靠距离过滤掉。
+  // 处理桩检测结果。检测结果已是车体系坐标（perception 做了 tf 变换），
+  // 不依赖 odom：启动时按车体 y 分上下锁定，之后按"短时连续性"匹配
+  //（20ms 一帧车最多动几毫米，桩的车体系坐标几乎不变）。
   void on_piles(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
-    // 世界坐标依赖 odom（car_x_/car_y_/car_yaw_），odom 没就绪前不处理
-    if (!have_pose_) return;
-
-    const double c = std::cos(car_yaw_);
-    const double s = std::sin(car_yaw_);
-
-    struct W { Vec2 pos; double radius; };
-    std::vector<W> world;
+    struct B { Vec2 pos; double radius; };
+    std::vector<B> body;
     for (const auto& m : msg->markers) {
-      const double bx = m.pose.position.x;
-      const double by = m.pose.position.y;
-      world.push_back({{car_x_ + c * bx - s * by, car_y_ + s * bx + c * by},
-                       m.scale.x * 0.5});
+      body.push_back({{m.pose.position.x, m.pose.position.y}, m.scale.x * 0.5});
     }
 
-    // 启动时锁定两个真桩的世界坐标（此时无障碍，按世界 y 分上下）
+    // 启动时锁定两个真桩的车体系坐标（按车体 y 分上下）
     if (!piles_locked_) {
-      if (world.size() < 2) {
+      if (body.size() < 2) {
         have_piles_ = false;
         return;
       }
-      std::sort(world.begin(), world.end(),
-                [](const W& a, const W& b) { return a.pos.y < b.pos.y; });
-      pile_down_w_ = world.front().pos;
-      pile_up_w_ = world.back().pos;
-      down_r_ = world.front().radius;
-      up_r_ = world.back().radius;
+      std::sort(body.begin(), body.end(),
+                [](const B& a, const B& b) { return a.pos.y < b.pos.y; });
+      b_down_ = body.front().pos;
+      b_up_ = body.back().pos;
+      down_r_ = body.front().radius;
+      up_r_ = body.back().radius;
       piles_locked_ = true;
-      RCLCPP_INFO(get_logger(), "已锁定桩：下(%.2f,%.2f,r=%.2f) 上(%.2f,%.2f,r=%.2f)",
-                  pile_down_w_.x, pile_down_w_.y, down_r_,
-                  pile_up_w_.x, pile_up_w_.y, up_r_);
+      RCLCPP_INFO(get_logger(), "已锁定桩（车体系）：下(%.2f,%.2f,r=%.2f) 上(%.2f,%.2f,r=%.2f)",
+                  b_down_.x, b_down_.y, down_r_,
+                  b_up_.x, b_up_.y, up_r_);
     }
 
-    // 每帧用锁定世界坐标匹配：离锁定位置近的候选是真桩，远的忽略（障碍）
-    Vec2 down_w = pile_down_w_;   // 默认锁定坐标（桩不动，漏检时补上）
-    Vec2 up_w = pile_up_w_;
-    for (const auto& w : world) {
-      const double dd = std::hypot(w.pos.x - pile_down_w_.x, w.pos.y - pile_down_w_.y);
-      const double du = std::hypot(w.pos.x - pile_up_w_.x, w.pos.y - pile_up_w_.y);
+    // 每帧匹配：离锁定位置近的候选是真桩，远的忽略（杂物）
+    Vec2 down_b = b_down_;   // 默认锁定值（漏检时补上）
+    Vec2 up_b = b_up_;
+    for (const auto& b : body) {
+      const double dd = std::hypot(b.pos.x - b_down_.x, b.pos.y - b_down_.y);
+      const double du = std::hypot(b.pos.x - b_up_.x, b.pos.y - b_up_.y);
       if (dd < kPileMatchDist && dd < du) {
-        down_w = w.pos; down_r_ = w.radius;
+        down_b = b.pos; down_r_ = b.radius;
       } else if (du < kPileMatchDist) {
-        up_w = w.pos; up_r_ = w.radius;
+        up_b = b.pos; up_r_ = b.radius;
       }
-      // 离两个锁定位置都远 → 障碍圆柱，忽略
+      // 离两个锁定位置都远 → 杂物，忽略
     }
-
-    // 真桩世界坐标 → 车体系（控制律和桩系定位都用车体系）
-    b_down_ = to_body(down_w.x, down_w.y);
-    b_up_ = to_body(up_w.x, up_w.y);
+    b_down_ = down_b;
+    b_up_ = up_b;
     down_.R = down_r_ + kCarRadius + kMargin;
     up_.R = up_r_ + kCarRadius + kMargin;
     have_piles_ = true;
@@ -408,7 +399,8 @@ class Figure8Node : public rclcpp::Node {
     return scale({std::cos(avoid_ang_), std::sin(avoid_ang_)}, kAvoidSpeed);
   }
   void on_timer() {
-    if (!have_pose_) return;
+    // 不依赖 odom：桩锁定（车体系）之后就能跑，桩系定位不需要里程计
+    if (!have_piles_) return;
 
     const Vec2 b_cross = {(b_down_.x + b_up_.x) * 0.5,
                           (b_down_.y + b_up_.y) * 0.5};

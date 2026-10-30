@@ -49,10 +49,19 @@ wait_topic() {
   return 1
 }
 
-# Point-LIO 各安装版本 launch 名字不同，优先选含 mid360 的
+# Point-LIO 只用自己装的那份（~/ws_lio），没装就跳过——本实现用桩系定位，
+# 不依赖 /odom。绝不启动 /home/srm 下的（违规且路径硬编码，起不来）。
 find_lio_launch() {
+  local s="$HOME/ws_lio/install/setup.bash"
+  [ -f "$s" ] || return 1
+  # shellcheck disable=SC1090
+  source "$s" 2>/dev/null
   local prefix
   prefix=$(ros2 pkg prefix point_lio 2>/dev/null) || return 1
+  case "$prefix" in
+    "$HOME"*) ;;
+    *) return 1 ;;
+  esac
   ls "$prefix"/share/point_lio/launch/*.launch.py 2>/dev/null | grep -i mid360 | head -1 \
     || ls "$prefix"/share/point_lio/launch/*.launch.py 2>/dev/null | head -1
 }
@@ -76,12 +85,11 @@ fi
 say "串口 OK"
 
 LIO_LAUNCH="$(find_lio_launch)"
-if [ -z "$LIO_LAUNCH" ]; then
-  echo "❌ 找不到 Point-LIO 的 launch，/odom 会没有数据"
-  echo "   ros2 pkg prefix point_lio → $(ros2 pkg prefix point_lio 2>&1)"
-  exit 1
+if [ -n "$LIO_LAUNCH" ]; then
+  say "定位 launch：$(basename "$LIO_LAUNCH")"
+else
+  say "⚠️ 未安装自己的 Point-LIO，跳过定位（桩系定位不需要 /odom）"
 fi
-say "定位 launch：$(basename "$LIO_LAUNCH")"
 
 say "[1/3] 启动雷达..."
 ros2 launch "$HOME/ws_livox/src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py" \
@@ -94,9 +102,11 @@ fi
 say "      点云话题 OK"
 
 say "[2/3] 启动定位..."
-ros2 launch "$LIO_LAUNCH" > "$LOG_DIR/lio.log" 2>&1 &
-if ! wait_topic /odom 30; then
-  say "      ⚠️ /odom 还没出来（Point-LIO 常要车动一下才有输出），先继续"
+if [ -n "$LIO_LAUNCH" ]; then
+  ros2 launch "$LIO_LAUNCH" > "$LOG_DIR/lio.log" 2>&1 &
+  if ! wait_topic /odom 30; then
+    say "      ⚠️ /odom 还没出来（Point-LIO 常要车动一下才有输出），不影响主程序"
+  fi
 fi
 
 say "[3/3] 启动主程序..."
