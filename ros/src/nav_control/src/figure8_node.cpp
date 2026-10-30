@@ -311,9 +311,21 @@ class Figure8Node : public rclcpp::Node {
 
   // 避障仲裁：输入原目标速度，输出避障后的速度。
   // 思路：原目标方向被「人」挡时，用方向搜索找一条"净空足够 + 偏离小"的方向，
-  // 并对方向做平滑（避免一顿一顿）。只在直行段避障，绕桩段不避障。
+  // 并对方向做平滑（避免一顿一顿）。
+  // 直行段：偏转绕行。绕桩段：只停车等——绕圈靠径向修正闭环，换方向会和它打架。
   Vec2 avoid_arbitrate(const Vec2& v_orig) {
     const State st = sm_.state();
+
+    // 绕桩段：前方有人就停，人走了继续绕。不偏转、不占状态机暂停。
+    if (st == State::OrbitDown || st == State::OrbitUp) {
+      avoid_state_ = AvoidState::Normal;
+      avoid_ang_ = 0.0;
+      const double r = std::hypot(v_orig.x, v_orig.y);
+      if (r < 1e-6) return v_orig;
+      const double ang = std::atan2(v_orig.y, v_orig.x);
+      return (clearance_in_dir(ang, false) >= kSafeDist) ? v_orig : Vec2{0.0, 0.0};
+    }
+
     if (st != State::StraightIn && st != State::Cross && st != State::StraightOut) {
       avoid_state_ = AvoidState::Normal;
       avoid_ang_ = 0.0;
