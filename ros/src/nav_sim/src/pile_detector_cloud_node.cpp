@@ -47,6 +47,13 @@ class PerceptionNode : public rclcpp::Node {
     declare_parameter("cluster_dist", 0.20);
     declare_parameter("max_fit_rms", 0.06);
     declare_parameter("min_arc_deg", 0.0);
+    // 结构验证：真桩 = 低带（半圆）+ 上方稀疏细杆点。
+    // 低带找圆，高带数点：0 个 = 矮杂物，太多 = 上下一样粗的粗杂物。
+    declare_parameter("pile_low_max", 0.15);
+    declare_parameter("pile_high_min", 0.35);
+    declare_parameter("high_match_r", 0.06);
+    declare_parameter("high_min_pts", 2);
+    declare_parameter("high_max_pts", 40);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
@@ -66,6 +73,12 @@ class PerceptionNode : public rclcpp::Node {
     params_.max_fit_rms = get_parameter("max_fit_rms").as_double();
     params_.min_arc_deg = get_parameter("min_arc_deg").as_double();
 
+    pile_low_max_ = get_parameter("pile_low_max").as_double();
+    pile_high_min_ = get_parameter("pile_high_min").as_double();
+    high_match_r_ = get_parameter("high_match_r").as_double();
+    high_min_pts_ = get_parameter("high_min_pts").as_int();
+    high_max_pts_ = get_parameter("high_max_pts").as_int();
+
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         topic, rclcpp::SensorDataQoS(),
         std::bind(&PerceptionNode::on_cloud, this, _1));
@@ -76,13 +89,15 @@ class PerceptionNode : public rclcpp::Node {
   }
 
  private:
-  // 点云转 2D 点：高度切片 + 坐标变换 + 距离过滤 + 体素降采样
-  std::vector<Vec2> to_points(const sensor_msgs::msg::PointCloud2& msg) const {
-    std::vector<Vec2> pts;
+  // 点云转 2D 点：高度切片 + 坐标变换 + 距离过滤 + 体素降采样。
+  // 同时按高度分两带：低带（桩半圆）、高带（细杆），供结构验证。
+  void to_points(const sensor_msgs::msg::PointCloud2& msg,
+                 std::vector<Vec2>& all, std::vector<Vec2>& low,
+                 std::vector<Vec2>& high) const {
     const double c = std::cos(tf_yaw_);
     const double s = std::sin(tf_yaw_);
     const double inv_voxel = 1.0 / std::max(voxel_, 1e-3);
-    std::unordered_set<int64_t> seen;   // 体素去重
+    std::unordered_set<int64_t> seen;   // 体素去重（key 带高度带，低带高带互不挤占）
 
     sensor_msgs::PointCloud2ConstIterator<float> ix(msg, "x");
     sensor_msgs::PointCloud2ConstIterator<float> iy(msg, "y");
@@ -96,12 +111,17 @@ class PerceptionNode : public rclcpp::Node {
       if (r < min_r_ || r > max_r_) continue;      // 距离过滤
       const int gx = static_cast<int>(std::floor(x * inv_voxel));
       const int gy = static_cast<int>(std::floor(y * inv_voxel));
-      const int64_t key = (static_cast<int64_t>(gx) << 32) ^
-                          static_cast<int64_t>(static_cast<uint32_t>(gy));
+      const int band = (z <= pile_low_max_) ? 0 : ((z >= pile_high_min_) ? 1 : 2);
+      const int64_t key = (static_cast<int64_t>(gx) << 40) ^
+                          (static_cast<int64_t>(gy) << 8) ^ band;
       if (!seen.insert(key).second) continue;
-      pts.push_back({x, y});
+      all.push_back({x, y});
+      if (band == 0) {
+        low.push_back({x, y});
+      } else if (band == 1) {
+        high.push_back({x, y});
+      }
     }
-    return pts;
   }
 
   // 2D 点 → LaserScan（按角度分桶，每桶取最近距离），给避障用
@@ -135,13 +155,27 @@ class PerceptionNode : public rclcpp::Node {
   }
 
   void on_cloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
-    const std::vector<Vec2> pts = to_points(*msg);
+    std::vector<Vec2> all, low, high;
+    to_points(*msg, all, low, high);
 
-    // 1) 桩检测 → /piles
-    const auto piles = nav::detect_piles(pts, params_);
+    // 1) 桩检测：只在低带（半圆）里找圆
+    const auto piles = nav::detect_piles(low, params_);
+
+    // 2) 结构验证：真桩 = 低带圆正上方有"稀疏"的细杆点。
+    //    上方 0 点 = 矮杂物；上方点太多 = 上下一样粗的粗杂物。
+    std::vector<nav::Pile> kept;
+    for (const auto& pl : piles) {
+      int n = 0;
+      for (const auto& p : high) {
+        if (std::hypot(p.x - pl.center.x, p.y - pl.center.y) < high_match_r_) ++n;
+      }
+      if (n >= high_min_pts_ && n <= high_max_pts_) kept.push_back(pl);
+    }
+
+    // 3) 验证后的桩 → /piles
     visualization_msgs::msg::MarkerArray arr;
     int id = 0;
-    for (const auto& pl : piles) {
+    for (const auto& pl : kept) {
       visualization_msgs::msg::Marker m;
       m.header = msg->header;
       m.ns = "piles";
@@ -163,17 +197,21 @@ class PerceptionNode : public rclcpp::Node {
     }
     piles_pub_->publish(arr);
 
-    // 2) 同一个 2D 点集 → /scan（避障用）
-    publish_scan(pts, msg->header);
+    // 4) 全部 2D 点 → /scan（避障要看完整轮廓，不分带）
+    publish_scan(all, msg->header);
 
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
-                         "2D点=%zu 检测到 %zu 个桩", pts.size(), piles.size());
+                         "2D点=%zu 低带=%zu 高带=%zu 圆候选=%zu 真桩=%zu",
+                         all.size(), low.size(), high.size(), piles.size(), kept.size());
   }
 
   double min_h_{0.10}, max_h_{1.50};
   double min_r_{0.30}, max_r_{6.00};
   double voxel_{0.05};
   double tf_x_{0.0}, tf_y_{0.0}, tf_z_{0.0}, tf_yaw_{0.0};
+  double pile_low_max_{0.15}, pile_high_min_{0.35};
+  double high_match_r_{0.06};
+  int high_min_pts_{2}, high_max_pts_{40};
 
   nav::PileDetectParams params_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;

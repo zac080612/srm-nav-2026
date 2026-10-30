@@ -40,6 +40,13 @@ def generate_launch_description():
             # 圆形验证：弧长 30°（太严真桩会被滤掉），残差 0.02m
             "min_arc_deg": LaunchConfiguration("min_arc_deg"),
             "max_fit_rms": LaunchConfiguration("max_fit_rms"),
+            # 结构验证：低带找半圆，高带（0.35 以上）数细杆点。
+            # 上方 0 点 = 矮杂物；太多 = 上下一样粗的粗杂物；稀疏 = 真细杆。
+            "pile_low_max": LaunchConfiguration("pile_low_max"),
+            "pile_high_min": LaunchConfiguration("pile_high_min"),
+            "high_match_r": LaunchConfiguration("high_match_r"),
+            "high_min_pts": LaunchConfiguration("high_min_pts"),
+            "high_max_pts": LaunchConfiguration("high_max_pts"),
             # 雷达相对车体的平面变换：tf_yaw 按标定值（约 -90°，雷达装转了 90°）
             "tf_x": 0.0,
             "tf_y": 0.0,
@@ -119,6 +126,16 @@ def generate_launch_description():
                               description="赛场干净，弧长检查关闭"),
         DeclareLaunchArgument("max_fit_rms", default_value="0.06",
                               description="赛场干净，残差放宽"),
+        DeclareLaunchArgument("pile_low_max", default_value="0.15",
+                              description="低带高度上限(m)：0.15 以下算桩半圆，圆拟合只看这部分"),
+        DeclareLaunchArgument("pile_high_min", default_value="0.35",
+                              description="高带高度下限(m)：0.35 以上的点算细杆候选"),
+        DeclareLaunchArgument("high_match_r", default_value="0.06",
+                              description="细杆点与圆心匹配半径(m)：杆顶投影会偏离圆心一点，放宽"),
+        DeclareLaunchArgument("high_min_pts", default_value="2",
+                              description="细杆最少点数：上方没有点=矮杂物"),
+        DeclareLaunchArgument("high_max_pts", default_value="40",
+                              description="细杆最多点数：太多=上下一样粗的粗杂物"),
         DeclareLaunchArgument("park_x", default_value="-1.5"),
         DeclareLaunchArgument("park_y", default_value="-2.5"),
         DeclareLaunchArgument("v_lin", default_value="0.40"),
