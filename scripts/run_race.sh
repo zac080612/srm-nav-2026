@@ -15,12 +15,14 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$LOG_DIR"
 
 # shellcheck disable=SC1091
+set +u    # ROS 官方 setup.bash 不兼容 nounset，source 期间临时关闭
 source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1090
 source "$HOME/ws_livox/install/setup.bash" 2>/dev/null || true
 source "$HOME/ws_lio/install/setup.bash" 2>/dev/null || true
 # shellcheck disable=SC1091
 source "$REPO/ros/install/setup.bash"
+set -u
 
 say() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 

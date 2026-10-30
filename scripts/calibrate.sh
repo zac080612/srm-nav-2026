@@ -13,12 +13,14 @@ mkdir -p "$LOG"
 
 # 环境全部在脚本内完成，不依赖终端手动 source
 export ROS_LOCALHOST_ONLY=1
+set +u    # ROS 官方 setup.bash 不兼容 nounset，source 期间临时关闭
 # shellcheck disable=SC1091
 source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1090
 source "$HOME/ws_livox/install/setup.bash" 2>/dev/null || true
 # shellcheck disable=SC1091
 source "$REPO/ros/install/setup.bash"
+set -u
 
 cleanup() {
   pkill -f calib_node 2>/dev/null
