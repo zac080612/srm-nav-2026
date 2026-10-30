@@ -67,6 +67,8 @@ class CalibNode : public rclcpp::Node {
     declare_parameter("pulse_ms", 800);
     declare_parameter("settle_ms", 400);
     declare_parameter("sample_ms", 300);
+    declare_parameter("noise_ms", 1500);
+    declare_parameter("min_disp", 0.02);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
@@ -81,6 +83,8 @@ class CalibNode : public rclcpp::Node {
     pulse_ms_ = get_parameter("pulse_ms").as_int();
     settle_ms_ = get_parameter("settle_ms").as_int();
     sample_ms_ = get_parameter("sample_ms").as_int();
+    noise_ms_ = get_parameter("noise_ms").as_int();
+    min_disp_ = get_parameter("min_disp").as_double();
 
     const std::string topic = get_parameter("cloud_topic").as_string();
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -97,6 +101,7 @@ class CalibNode : public rclcpp::Node {
  private:
   enum class Stage {
     kWaitCloud,
+    kNoise,
     kRestVx,
     kBeforeVx,
     kPulseVx,
@@ -142,11 +147,15 @@ class CalibNode : public rclcpp::Node {
     return pts;
   }
 
-  // 收点云：采样阶段把点集攒起来，供质心差使用
+  // 收点云：采样阶段把点集攒起来，供质心差使用；噪声阶段记录每帧质心
   void on_cloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     const std::vector<Vec2> pts = to_points(*msg);
     if (pts.size() < kMinCloudPoints) return;
     last_points_ = pts;
+
+    if (stage_ == Stage::kNoise) {
+      noise_centroids_.push_back(centroid_of(pts));
+    }
 
     const bool sampling = (stage_ == Stage::kBeforeVx || stage_ == Stage::kBeforeVy ||
                            stage_ == Stage::kAfterVx || stage_ == Stage::kAfterVy);
@@ -185,6 +194,7 @@ class CalibNode : public rclcpp::Node {
     buffer_.clear();
     buffer_frames_ = 0;
     switch (s) {
+      case Stage::kNoise: RCLCPP_INFO(get_logger(), "[0/4] 静止 %.1f 秒测点云噪声底（此时车不应动）", noise_ms_ / 1000.0); break;
       case Stage::kRestVx: RCLCPP_INFO(get_logger(), "[1/4] 静止，准备测协议 vx 方向的真实走向"); break;
       case Stage::kBeforeVx: RCLCPP_INFO(get_logger(), "      采样起点…"); break;
       case Stage::kPulseVx: RCLCPP_INFO(get_logger(), "      发 vx=+%.2f，走 %d ms", v_test_, pulse_ms_); break;
@@ -210,6 +220,18 @@ class CalibNode : public rclcpp::Node {
     return out;
   }
 
+  // 噪声底 = 静止阶段各帧质心间的最大漂移距离（车没动时点云也会抖）
+  double noise_floor() const {
+    double mx = 0.0;
+    for (size_t i = 0; i < noise_centroids_.size(); ++i) {
+      for (size_t j = i + 1; j < noise_centroids_.size(); ++j) {
+        mx = std::max(mx, std::hypot(noise_centroids_[i].x - noise_centroids_[j].x,
+                                     noise_centroids_[i].y - noise_centroids_[j].y));
+      }
+    }
+    return mx;
+  }
+
   // 每 20ms：发当前阶段该发的帧，然后推进状态机
   void on_tick() {
     stage_ms_ += kTickMs;
@@ -233,7 +255,10 @@ class CalibNode : public rclcpp::Node {
 
     switch (stage_) {
       case Stage::kWaitCloud:
-        if (!last_points_.empty()) enter(Stage::kRestVx);
+        if (!last_points_.empty()) enter(Stage::kNoise);
+        break;
+      case Stage::kNoise:
+        if (stage_ms_ >= noise_ms_) enter(Stage::kRestVx);
         break;
       case Stage::kRestVx:
         if (stage_ms_ >= settle) enter(Stage::kBeforeVx);
@@ -353,6 +378,22 @@ class CalibNode : public rclcpp::Node {
     const double v_real = disp / t_pulse;
     const double scale = (v_real > 1e-4) ? (v_test_ / v_real) : 0.0;
 
+    // 位移有效性：必须明显大于静止噪声底（车没动时点云质心也会抖出假位移）
+    const double noise = noise_floor();
+    if (disp < 3.0 * noise && disp < min_disp_) {
+      RCLCPP_WARN(get_logger(), " ");
+      RCLCPP_WARN(get_logger(), "⚠ 车没有动：位移 %.4f m，噪声底 %.4f m（3倍=%.4f m）",
+                  disp, noise, 3.0 * noise);
+      RCLCPP_WARN(get_logger(), " 按顺序检查：");
+      RCLCPP_WARN(get_logger(), "   1. 急停按钮是否旋起");
+      RCLCPP_WARN(get_logger(), "   2. 底盘电源 / 电池");
+      RCLCPP_WARN(get_logger(), "   3. 串口是否写失败：grep 写失败 /tmp/srm_calib/serial.log");
+      RCLCPP_WARN(get_logger(), "   4. 下位机是否需要裁判系统信号才使能（问赛务）");
+      RCLCPP_WARN(get_logger(), " 标定结果无效，未输出。");
+      return;
+    }
+    RCLCPP_INFO(get_logger(), "车动了：位移 %.3f m（噪声底 %.4f m）", disp, noise);
+
     RCLCPP_INFO(get_logger(), "========== R_bc 标定结果 ==========");
     RCLCPP_INFO(get_logger(), "发 vx=+%.2f → 车实际往 (% .2f, % .2f) 走，角度 % 7.1f°", v_test_, d1.x, d1.y, to_deg(a1));
     RCLCPP_INFO(get_logger(), "发 vy=+%.2f → 车实际往 (% .2f, % .2f) 走，角度 % 7.1f°", v_test_, d2.x, d2.y, to_deg(a2));
@@ -401,6 +442,9 @@ class CalibNode : public rclcpp::Node {
   std::vector<Vec2> buffer_;
   int buffer_frames_{0};
   std::vector<Vec2> before_vx_, after_vx_, before_vy_, after_vy_;
+  std::vector<Vec2> noise_centroids_;
+  int noise_ms_{1500};
+  double min_disp_{0.02};
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
   rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr raw_pub_;
