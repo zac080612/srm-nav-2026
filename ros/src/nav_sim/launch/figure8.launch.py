@@ -54,6 +54,8 @@ def generate_launch_description():
             "a_max": 1.0,
             "v_t": 0.7,
             "k_r": 0.8,
+            # 仿真里 fake_mcu 按 m/s 解释，不受实车 0.4 限制
+            "v_max_ms": 1.5,
             "speed_limit": 1.5,
             "speed_scale": 1.0,
             "auto_start": True,

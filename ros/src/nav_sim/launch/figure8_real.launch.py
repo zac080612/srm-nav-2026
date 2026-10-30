@@ -56,6 +56,9 @@ def generate_launch_description():
             "v_t": LaunchConfiguration("v_t"),
             "a_max": 1.0,
             "k_r": 0.8,
+            # 真实速度上限(m/s)：在换算成协议值之前卡住，保证 v_lin/v_t 不打折
+            "v_max_ms": LaunchConfiguration("v_max_ms"),
+            # 协议值安全兜底（换算后），不是速度限制；默认放宽到 2.0 避免截断
             "speed_limit": LaunchConfiguration("speed_limit"),
             # 量纲换算：控制律按 m/s 规划，协议字段是与底盘速度成正比的数值
             "speed_scale": LaunchConfiguration("speed_scale"),
@@ -111,7 +114,10 @@ def generate_launch_description():
         DeclareLaunchArgument("park_y", default_value="-2.5"),
         DeclareLaunchArgument("v_lin", default_value="0.40"),
         DeclareLaunchArgument("v_t", default_value="0.40"),
-        DeclareLaunchArgument("speed_limit", default_value="0.50"),
+        DeclareLaunchArgument("v_max_ms", default_value="0.40",
+                              description="真实速度上限(m/s)，在换算成协议值前卡住"),
+        DeclareLaunchArgument("speed_limit", default_value="2.0",
+                              description="协议值安全兜底(换算后)，不是速度限制"),
         DeclareLaunchArgument("speed_scale", default_value="1.0",
                               description="协议数值 / (m/s)；实车量出 1 个协议值对应多少 m/s 后填"),
         DeclareLaunchArgument("auto_start", default_value="false"),

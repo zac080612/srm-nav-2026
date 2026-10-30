@@ -62,8 +62,9 @@ class Figure8Node : public rclcpp::Node {
     declare_parameter("a_max", 1.0);
     declare_parameter("v_t", 0.4);
     declare_parameter("k_r", 0.8);
+    declare_parameter("v_max_ms", 0.4);
     declare_parameter("auto_start", false);
-    declare_parameter("speed_limit", 0.5);
+    declare_parameter("speed_limit", 2.0);
     // 量纲换算：控制律内部按 m/s 规划轨迹，而协议字段是「与底盘速度成正比的数值」，
     // 不是 m/s（协议 3.1/3.3，参考比例 10000:1，满杆约 39600）。
     // speed_scale = 协议数值 ÷ 实际速度(m/s)，实车量出来后填，仿真保持 1.0。
@@ -81,6 +82,7 @@ class Figure8Node : public rclcpp::Node {
     a_max_ = get_parameter("a_max").as_double();
     auto_start_ = get_parameter("auto_start").as_bool();
     speed_scale_ = get_parameter("speed_scale").as_double();
+    v_max_ms_ = get_parameter("v_max_ms").as_double();
 
     down_.ccw = true;
     up_.ccw = false;
@@ -110,8 +112,9 @@ class Figure8Node : public rclcpp::Node {
                                std::bind(&Figure8Node::on_timer, this));
 
     RCLCPP_INFO(get_logger(), "figure8 启动，等待 /odom 与 /piles ...");
-    RCLCPP_INFO(get_logger(), "速度：v_lin=%.2f v_t=%.2f 限幅=%.2f 缩放=%.2f（发出值 = m/s × 缩放）",
-                v_lin_, down_.v_t, get_parameter("speed_limit").as_double(), speed_scale_);
+    RCLCPP_INFO(get_logger(), "速度：v_lin=%.2f v_t=%.2f 真实上限=%.2f m/s 协议限幅=%.2f 缩放=%.2f",
+                v_lin_, down_.v_t, v_max_ms_, get_parameter("speed_limit").as_double(),
+                speed_scale_);
   }
 
  private:
@@ -425,9 +428,19 @@ class Figure8Node : public rclcpp::Node {
 
     const Vec2 v = target_velocity(sm_.state(), b_near, b_cross, b_park, v_now_);
     const Vec2 v_avoid = avoid_arbitrate(v);
+    // 真实速度上限（m/s）：先在这里卡住，保证 v_lin/v_t 要多少就是多少，
+    // 不会因为换算成协议值后又撞上 speed_limit 而被打折。
+    double vx_ms = v_avoid.x;
+    double vy_ms = v_avoid.y;
+    const double vmag = std::hypot(vx_ms, vy_ms);
+    if (vmag > v_max_ms_ && vmag > 1e-9) {
+      const double k = v_max_ms_ / vmag;
+      vx_ms *= k;
+      vy_ms *= k;
+    }
     // m/s → 协议数值：协议 3.1 明确 vx/vy 只是「与底盘速度成正比的指令」
-    const ProtoCmd c = map_body_to_protocol(rbc_, v_avoid.x * speed_scale_,
-                                            v_avoid.y * speed_scale_);
+    const ProtoCmd c = map_body_to_protocol(rbc_, vx_ms * speed_scale_,
+                                            vy_ms * speed_scale_);
     safe_.update(c.vx, c.vy);
     const UpFrame frame = safe_.tick(seq_++);
 
@@ -445,6 +458,7 @@ class Figure8Node : public rclcpp::Node {
   bool park_calibrated_{false}; // 是否已标定停车位
   double v_lin_{0.4};
   double a_max_{1.0};
+  double v_max_ms_{0.4};
   double speed_scale_{1.0};
   OrbitParams down_, up_;
 
