@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # 一键标定 R_bc 和 speed_scale：清进程 → 找串口 → 起雷达 → 起串口 → 跑标定
-# 用法：bash scripts/calibrate.sh [串口设备] [v_test]
+# 用法：bash scripts/calibrate.sh [串口设备] [v_test] [pulse_ms]
 #   串口设备留空 = 自动用 /dev/serial/by-id/ 下第一个
-#   v_test 默认 0.08；车不动就加大，如 0.30
+#   v_test 默认 0.08；车不动就加大（满杆≈2m/s 时，1 协议值≈0.5m/s，建议 0.8~1.2）
+#   pulse_ms 默认 2000；v_test 大时相应减小，避免冲太远
 set -u
 DEV="${1:-}"
 V_TEST="${2:-0.08}"
+PULSE_MS="${3:-2000}"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LOG=/tmp/srm_calib
@@ -79,11 +81,11 @@ say "串口后端 OK"
 # ---- 4. 标定（前台跑，结果直接打印）----
 echo
 echo "=============================================="
-echo " 标定开始：车会动 3 轮（约 30cm）"
+echo " 标定开始：车会动 3 轮"
 echo " 要求：车落地、场地留 30cm、手放急停旁边"
-echo " v_test=$V_TEST（车不动就 Ctrl+C，加大后重跑）"
+echo " v_test=$V_TEST pulse_ms=$PULSE_MS（车不动就 Ctrl+C，加大 v_test 重跑）"
 echo "=============================================="
 ros2 run nav_sim calib_node --ros-args \
-  -p v_test:="$V_TEST" -p pulse_ms:=2000 -p tf_z:=0.20
+  -p v_test:="$V_TEST" -p pulse_ms:="$PULSE_MS" -p tf_z:=0.20
 
 say "标定结束，结果见上方输出。"
