@@ -12,6 +12,8 @@ struct PileDetectParams {
   size_t min_points{5};        // 一个桩至少这么多扫描点
   double min_radius{0.03};     // 桩半径下限（米）
   double max_radius{0.30};     // 桩半径上限（米）
+  double max_fit_rms{0.02};    // 点到拟合圆的 RMS 残差上限（米），非圆形杂物靠它排除
+  double min_arc_deg{60.0};    // 点覆盖的最小圆心角（度），直线/墙面靠它排除
 };
 
 // 检测到的桩：圆心 + 半径

@@ -45,6 +45,9 @@ class PerceptionNode : public rclcpp::Node {
     declare_parameter("max_radius", 0.20);
     declare_parameter("min_points", 5);
     declare_parameter("cluster_dist", 0.15);
+    // 圆形验证：残差过大或弧长不够的簇丢掉，排除墙/桌沿这类"一段弧"杂物
+    declare_parameter("max_fit_rms", 0.02);
+    declare_parameter("min_arc_deg", 60.0);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
@@ -61,6 +64,8 @@ class PerceptionNode : public rclcpp::Node {
     params_.max_radius = get_parameter("max_radius").as_double();
     params_.min_points = static_cast<size_t>(get_parameter("min_points").as_int());
     params_.cluster_dist = get_parameter("cluster_dist").as_double();
+    params_.max_fit_rms = get_parameter("max_fit_rms").as_double();
+    params_.min_arc_deg = get_parameter("min_arc_deg").as_double();
 
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         topic, rclcpp::SensorDataQoS(),

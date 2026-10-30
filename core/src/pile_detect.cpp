@@ -1,5 +1,6 @@
 #include "nav/pile_detect.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace nav {
@@ -83,6 +84,31 @@ bool fit_circle(const std::vector<Vec2>& pts, Vec2& center, double& radius) {
   return true;
 }
 
+// 圆形检查：点到拟合圆的残差要小，且点在圆上要铺开足够角度
+// （排除墙、桌沿这类"一段弧也能拟合出圆"的杂物）
+bool pile_like(const std::vector<Vec2>& pts, const Vec2& c, double r,
+               double max_rms, double min_arc_deg) {
+  if (pts.size() < 3) return false;
+
+  double se = 0.0;
+  for (const auto& p : pts) {
+    const double d = std::hypot(p.x - c.x, p.y - c.y) - r;
+    se += d * d;
+  }
+  if (std::sqrt(se / static_cast<double>(pts.size())) > max_rms) return false;
+
+  std::vector<double> angs;
+  angs.reserve(pts.size());
+  for (const auto& p : pts) angs.push_back(std::atan2(p.y - c.y, p.x - c.x));
+  std::sort(angs.begin(), angs.end());
+
+  double gap = angs.front() + 2.0 * M_PI - angs.back();   // 首尾相接那个间隙
+  for (size_t i = 1; i < angs.size(); ++i) {
+    gap = std::max(gap, angs[i] - angs[i - 1]);
+  }
+  return (360.0 - gap * 180.0 / M_PI) >= min_arc_deg;
+}
+
 }  // namespace
 
 // 从点集检测桩（半径未知，拟合后按半径范围筛）
@@ -95,7 +121,8 @@ std::vector<Pile> detect_piles(const std::vector<Vec2>& points,
     Vec2 center;
     double radius = 0;
     if (fit_circle(c, center, radius) &&
-        radius >= p.min_radius && radius <= p.max_radius) {
+        radius >= p.min_radius && radius <= p.max_radius &&
+        pile_like(c, center, radius, p.max_fit_rms, p.min_arc_deg)) {
       out.push_back({center, radius});
     }
   }
