@@ -320,13 +320,17 @@ class CalibNode : public rclcpp::Node {
     const double q1 = k1 * (M_PI / 2.0);
     const double q2 = k2 * (M_PI / 2.0);
 
-    // 量化后的两个方向就是 R_bc 隐含的运动方向：d1 = (r22, -r21)，d2 = (-r12, r11)
+    // 两个实测方向是 R_bc 逆矩阵的两列：d1 = R_bc^-1·(1,0)，d2 = R_bc^-1·(0,1)。
+    // 直接求逆：R_bc = [d1|d2]^-1。det 不假设为 +1——镜像轴布局 det=-1，
+    // 忽略符号会让 R_bc 整体反号，车往反方向跑。
     const double c1 = std::cos(q1), s1 = std::sin(q1);
     const double c2 = std::cos(q2), s2 = std::sin(q2);
-    const double r11 = s2;
-    const double r12 = -c2;
-    const double r21 = -s1;
-    const double r22 = c1;
+    const double det = c1 * s2 - s1 * c2;
+    if (std::fabs(det) < 1e-3) { fail("两个实测方向平行，解不出 R_bc"); return; }
+    const double r11 = s2 / det;
+    const double r12 = -c2 / det;
+    const double r21 = -s1 / det;
+    const double r22 = c1 / det;
 
     nav::Mat2 rbc;
     rbc.m[0][0] = r11;
