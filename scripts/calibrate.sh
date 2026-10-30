@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # 一键标定 R_bc 和 speed_scale：清进程 → 找串口 → 起雷达 → 起串口 → 跑标定
-# 用法：bash scripts/calibrate.sh [串口设备] [v_test] [pulse_ms]
+# 用法：bash scripts/calibrate.sh [串口设备] [v_test] [pulse_ms] [tf_yaw]
 #   串口设备留空 = 自动用 /dev/serial/by-id/ 下第一个
 #   v_test 默认 1.2（满杆≈2m/s 时约 0.6m/s）；pulse_ms 默认 800（位移约 50cm）
+#   tf_yaw 默认 -1.5708（-90°：雷达相对车体安装角，按肉眼实测方向与点云方向的差确定）
 set -u
 DEV="${1:-}"
 V_TEST="${2:-1.2}"
 PULSE_MS="${3:-800}"
+TF_YAW="${4:--1.5708}"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LOG=/tmp/srm_calib
@@ -82,9 +84,9 @@ echo
 echo "=============================================="
 echo " 标定开始：车会动 3 轮"
 echo " 要求：车落地、场地留 30cm、手放急停旁边"
-echo " v_test=$V_TEST pulse_ms=$PULSE_MS（车不动就 Ctrl+C，加大 v_test 重跑）"
+echo " v_test=$V_TEST pulse_ms=$PULSE_MS tf_yaw=$TF_YAW"
 echo "=============================================="
 ros2 run nav_sim calib_node --ros-args \
-  -p v_test:="$V_TEST" -p pulse_ms:="$PULSE_MS" -p tf_z:=0.20
+  -p v_test:="$V_TEST" -p pulse_ms:="$PULSE_MS" -p tf_z:=0.20 -p tf_yaw:="$TF_YAW"
 
 say "标定结束，结果见上方输出。"

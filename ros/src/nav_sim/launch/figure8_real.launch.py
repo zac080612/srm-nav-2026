@@ -40,10 +40,10 @@ def generate_launch_description():
             # 圆形验证：弧长 30°（太严真桩会被滤掉），残差 0.02m
             "min_arc_deg": LaunchConfiguration("min_arc_deg"),
             "max_fit_rms": LaunchConfiguration("max_fit_rms"),
-            # 雷达相对车体的平面变换，实测后填
+            # 雷达相对车体的平面变换：tf_yaw 按标定值（约 -90°，雷达装转了 90°）
             "tf_x": 0.0,
             "tf_y": 0.0,
-            "tf_yaw": 0.0,
+            "tf_yaw": LaunchConfiguration("tf_yaw"),
         }],
     )
 
@@ -100,6 +100,8 @@ def generate_launch_description():
         # ---- 感知：按实车实测值设默认（雷达离地 0.2m，桩半圆半径 10cm）----
         DeclareLaunchArgument("tf_z", default_value="0.20",
                               description="雷达离地高度(m)，把点云 z 抬到地面系"),
+        DeclareLaunchArgument("tf_yaw", default_value="-1.5708",
+                              description="雷达相对车体的安装角(弧度)，约-90°：雷达装转了90°"),
         DeclareLaunchArgument("min_height", default_value="0.02",
                               description="高度切片下限(m，地面系)：略高于地面，排除地面点"),
         DeclareLaunchArgument("max_height", default_value="0.15",
