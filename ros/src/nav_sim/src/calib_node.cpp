@@ -68,7 +68,7 @@ class CalibNode : public rclcpp::Node {
     declare_parameter("settle_ms", 400);
     declare_parameter("sample_ms", 300);
     declare_parameter("noise_ms", 1500);
-    declare_parameter("min_disp", 0.03);
+    declare_parameter("min_disp", 0.02);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
@@ -449,7 +449,7 @@ class CalibNode : public rclcpp::Node {
   std::vector<Vec2> before_vx_, after_vx_, before_vy_, after_vy_;
   std::vector<Vec2> noise_centroids_;
   int noise_ms_{1500};
-  double min_disp_{0.03};
+  double min_disp_{0.02};
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
   rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr raw_pub_;
