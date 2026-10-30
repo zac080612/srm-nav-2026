@@ -52,16 +52,16 @@ fi
 say "串口：$DEV"
 
 # ---- 2. 雷达（没起才起）----
-if ! ros2 topic list 2>/dev/null | grep -qx /livox/lidar; then
+if ! ros2 topic list --no-daemon 2>/dev/null | grep -qx /livox/lidar; then
   say "雷达没起，自动启动..."
   ros2 launch "$HOME/ws_livox/src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py" \
     > "$LOG/livox.log" 2>&1 &
   for i in $(seq 1 30); do
     sleep 1
-    ros2 topic list 2>/dev/null | grep -qx /livox/lidar && break
+    ros2 topic list --no-daemon 2>/dev/null | grep -qx /livox/lidar && break
   done
 fi
-if ! ros2 topic list 2>/dev/null | grep -qx /livox/lidar; then
+if ! ros2 topic list --no-daemon 2>/dev/null | grep -qx /livox/lidar; then
   echo "❌ 雷达没起来，日志尾部："
   tail -15 "$LOG/livox.log" 2>/dev/null | sed 's/^/   /'
   exit 1

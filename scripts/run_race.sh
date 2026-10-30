@@ -42,7 +42,8 @@ trap stop_all EXIT INT TERM HUP
 wait_topic() {
   local topic="$1" secs="$2" i
   for i in $(seq 1 "$secs"); do
-    if ros2 topic list 2>/dev/null | grep -qx "$topic"; then return 0; fi
+    # --no-daemon：不经过 ros2 daemon（daemon 环境没带 LOCALHOST_ONLY，会发现不到节点）
+    if ros2 topic list --no-daemon 2>/dev/null | grep -qx "$topic"; then return 0; fi
     sleep 1
   done
   return 1
@@ -104,7 +105,7 @@ ros2 launch nav_sim figure8_real.launch.py \
 
 sleep 6
 for t in /piles /scan /raw_frame; do
-  if ros2 topic list 2>/dev/null | grep -qx "$t"; then
+  if ros2 topic list --no-daemon 2>/dev/null | grep -qx "$t"; then
     say "      $t OK"
   else
     say "      ⚠️ $t 没有，检查 $LOG_DIR/main.log"
