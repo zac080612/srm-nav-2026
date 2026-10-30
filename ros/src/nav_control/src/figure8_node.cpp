@@ -58,12 +58,12 @@ class Figure8Node : public rclcpp::Node {
   Figure8Node() : Node("figure8") {
     declare_parameter("park_x", -1.5);
     declare_parameter("park_y", -2.5);
-    declare_parameter("v_lin", 0.2);
+    declare_parameter("v_lin", 0.4);
     declare_parameter("a_max", 1.0);
-    declare_parameter("v_t", 0.2);
+    declare_parameter("v_t", 0.4);
     declare_parameter("k_r", 0.8);
     declare_parameter("auto_start", false);
-    declare_parameter("speed_limit", 0.2);
+    declare_parameter("speed_limit", 0.5);
     // 量纲换算：控制律内部按 m/s 规划轨迹，而协议字段是「与底盘速度成正比的数值」，
     // 不是 m/s（协议 3.1/3.3，参考比例 10000:1，满杆约 39600）。
     // speed_scale = 协议数值 ÷ 实际速度(m/s)，实车量出来后填，仿真保持 1.0。
@@ -443,8 +443,8 @@ class Figure8Node : public rclcpp::Node {
   Vec2 park_;
   Vec2 p_park_{0.0, 0.0};       // 停车位在桩系的坐标（启动时标定）
   bool park_calibrated_{false}; // 是否已标定停车位
-  double v_lin_{0.20};
-  double a_max_{0.20};
+  double v_lin_{0.4};
+  double a_max_{1.0};
   double speed_scale_{1.0};
   OrbitParams down_, up_;
 
