@@ -20,6 +20,9 @@ class PileDetectorNode : public rclcpp::Node {
     declare_parameter("max_radius", 0.30);
     params_.min_radius = get_parameter("min_radius").as_double();
     params_.max_radius = get_parameter("max_radius").as_double();
+    // 仿真用单层水平激光，远桩只露出正面一小段弧（<10°），
+    // 弧长检查在这里会误杀真桩，显式关闭。
+    params_.min_arc_deg = 0.0;
 
     sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
         "/scan", 10, std::bind(&PileDetectorNode::on_scan, this, _1));

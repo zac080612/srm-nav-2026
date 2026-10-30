@@ -68,7 +68,7 @@ class CalibNode : public rclcpp::Node {
     declare_parameter("settle_ms", 400);
     declare_parameter("sample_ms", 300);
     declare_parameter("noise_ms", 1500);
-    declare_parameter("min_disp", 0.02);
+    declare_parameter("min_disp", 0.03);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
@@ -383,16 +383,17 @@ class CalibNode : public rclcpp::Node {
     if (noise > 0.05) {
       RCLCPP_WARN(get_logger(), "⚠ 静止噪声底 %.3f m 过大：环境有动态物体（人/杂物）或点云太稀疏", noise);
     }
-    const bool moved = (disp > 3.0 * noise && disp > min_disp_);
+    const bool moved = (disp > 2.0 * noise && disp > min_disp_);
     if (!moved) {
       RCLCPP_WARN(get_logger(), " ");
-      RCLCPP_WARN(get_logger(), "⚠ 车没有动：位移 %.4f m，噪声底 %.4f m（3倍=%.4f m）",
-                  disp, noise, 3.0 * noise);
+      RCLCPP_WARN(get_logger(), "⚠ 车没有动：位移 %.4f m，噪声底 %.4f m（2倍=%.4f m）",
+                  disp, noise, 2.0 * noise);
       RCLCPP_WARN(get_logger(), " 按顺序检查：");
       RCLCPP_WARN(get_logger(), "   1. 急停按钮是否旋起");
       RCLCPP_WARN(get_logger(), "   2. 底盘电源 / 电池（下位机帧里电源标志位是否为 0）");
       RCLCPP_WARN(get_logger(), "   3. 串口是否写失败：grep 写失败 /tmp/srm_calib/serial.log");
       RCLCPP_WARN(get_logger(), "   4. 下位机是否需要裁判系统信号才使能（问赛务）");
+      RCLCPP_WARN(get_logger(), "   5. 脉冲太短？加长 pulse_ms 或减小 v_test 让位移更明显");
       RCLCPP_WARN(get_logger(), " 标定结果无效，未输出。");
       return;
     }
@@ -448,7 +449,7 @@ class CalibNode : public rclcpp::Node {
   std::vector<Vec2> before_vx_, after_vx_, before_vy_, after_vy_;
   std::vector<Vec2> noise_centroids_;
   int noise_ms_{1500};
-  double min_disp_{0.02};
+  double min_disp_{0.03};
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
   rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr raw_pub_;

@@ -45,9 +45,11 @@ class PerceptionNode : public rclcpp::Node {
     declare_parameter("max_radius", 0.20);
     declare_parameter("min_points", 5);
     declare_parameter("cluster_dist", 0.15);
-    // 圆形验证：残差过大或弧长不够的簇丢掉，排除墙/桌沿这类"一段弧"杂物
+    // 圆形验证：残差过大或弧长不够的簇丢掉，排除墙/桌沿这类"一段弧"杂物。
+    // 弧长阈值放低到 30°：实车桩（10cm 半球）在点云里的弧覆盖随距离/角度波动，
+    // 60° 会偶发把真桩滤掉（检测数跳到 0）。
     declare_parameter("max_fit_rms", 0.02);
-    declare_parameter("min_arc_deg", 60.0);
+    declare_parameter("min_arc_deg", 30.0);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();

@@ -37,6 +37,9 @@ def generate_launch_description():
             "max_radius": LaunchConfiguration("max_radius"),
             "min_points": LaunchConfiguration("min_points"),
             "cluster_dist": LaunchConfiguration("cluster_dist"),
+            # 圆形验证：弧长 30°（太严真桩会被滤掉），残差 0.02m
+            "min_arc_deg": LaunchConfiguration("min_arc_deg"),
+            "max_fit_rms": LaunchConfiguration("max_fit_rms"),
             # 雷达相对车体的平面变换，实测后填
             "tf_x": 0.0,
             "tf_y": 0.0,
@@ -110,6 +113,9 @@ def generate_launch_description():
                               description="桩半径上限(m)"),
         DeclareLaunchArgument("min_points", default_value="5"),
         DeclareLaunchArgument("cluster_dist", default_value="0.15"),
+        DeclareLaunchArgument("min_arc_deg", default_value="30.0",
+                              description="桩圆形验证的最小弧覆盖角(度)，太严真桩会被滤掉"),
+        DeclareLaunchArgument("max_fit_rms", default_value="0.02"),
         DeclareLaunchArgument("park_x", default_value="-1.5"),
         DeclareLaunchArgument("park_y", default_value="-2.5"),
         DeclareLaunchArgument("v_lin", default_value="0.40"),

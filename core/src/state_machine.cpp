@@ -9,7 +9,9 @@ namespace {
 constexpr double kArriveDist = 0.15;
 constexpr int kMissingLimit = 15;
 constexpr double kExitCos = -0.85;  // 出点判据：夹角 > 148° 时认为"车、桩、交叉点已共线"
-constexpr double kCrossNearDist = 0.30;  // 车离交叉点比这个近时，方向无法可靠判断
+constexpr double kCrossNearDist = 0.15;  // 车离交叉点比这个近时，方向无法可靠判断。
+                                         // 避障绕大圈会擦过交叉点附近（离 0.3m 左右），
+                                         // 0.30 会让那段弧的共线判定整体失效，绕圈永远切不出去。
 
 // 判断车相对桩的位置状态：
 //   返回  1 = 出点（车→桩 与 车→交叉点 反向，车在桩的交叉点侧）

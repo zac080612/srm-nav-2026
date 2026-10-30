@@ -35,10 +35,17 @@ namespace {
 
 constexpr double kCarRadius = 0.27;  // 车体半径（URDF）
 constexpr double kMargin = 0.20;     // 绕桩安全余量
-constexpr double kSafeDist = 0.5;   // 安全净空：车表面到障碍表面留 50cm（不含车/桩半径，已在 clearance 里扣掉）
+constexpr double kSafeDist = 0.2;   // 安全净空：车表面到障碍表面留 20cm（不含车/桩半径，已在 clearance 里扣掉）
+constexpr double kAvoidHyst = 0.10;     // 退出避障的迟滞带（米）：净空要超过 kSafeDist+kAvoidHyst 才恢复
+constexpr double kAvoidHystAng = 0.25;  // 方向搜索时"当前绕行方向"的代价优惠，防止在避人/避桩之间来回跳
 constexpr double kPileExclude = 0.35;
 constexpr double kAvoidSpeed = 0.5;
 constexpr int kStopFrames = 10;
+// 贴桩滑行阈值：桩的净空低于它才开始罚，≥ 它时允许沿桩面滑过去（不弹回）
+constexpr double kPileBrushDist = 0.08;
+// 净空计算的对象集合。人和桩分开算，因为惩罚策略不同：
+// 人是硬底线（净空不足就罚），桩允许贴边滑（只有真会撞才重罚）。
+enum class ObstacleSet { kHuman, kPile };
 constexpr double kPileMatchDist = 0.5;     // 桩匹配阈值：离锁定坐标超过它就当成障碍
 double wrap_pi(double a) {
   while (a > M_PI) a -= 2.0 * M_PI;
@@ -282,20 +289,20 @@ class Figure8Node : public rclcpp::Node {
   // 车沿方向 a（弧度）直线行驶时，到最近障碍表面的"净空距离"。
   // 用几何碰撞检测：障碍圆心到行驶直线的垂直距离 = |p×方向|，
   // 减去车半径和障碍半径就是净空。净空 <= 0 表示会撞。
-  // include_piles=false 时只看人（用于判断"是否要避障"）；
-  // include_piles=true 时把桩也算进去（用于选绕行方向，避免蹭桩）。
-  double clearance_in_dir(double a, bool include_piles) const {
+  // which 决定算谁：kHuman 只看人（判断是否触发避障），kPile 只看桩（方向搜索）。
+  double clearance_in_dir(double a, ObstacleSet which) const {
     const double dirx = std::cos(a), diry = std::sin(a);
     double min_clear = 1e9;
-    // 障碍点（人）：点本身在人表面附近，保守加 0.1 余量
-    for (const auto& p : obstacle_pts_) {
-      const double proj = p.x * dirx + p.y * diry;   // 沿方向的投影，<0 在车后方
-      if (proj < 0) continue;
-      const double lat = std::fabs(p.x * diry - p.y * dirx);  // 到行驶直线的垂直距离
-      const double clear = lat - kCarRadius - 0.1;
-      min_clear = std::min(min_clear, clear);
-    }
-    if (include_piles) {
+    if (which == ObstacleSet::kHuman) {
+      // 障碍点（人）：点本身在人表面附近，保守加 0.1 余量
+      for (const auto& p : obstacle_pts_) {
+        const double proj = p.x * dirx + p.y * diry;   // 沿方向的投影，<0 在车后方
+        if (proj < 0) continue;
+        const double lat = std::fabs(p.x * diry - p.y * dirx);  // 到行驶直线的垂直距离
+        const double clear = lat - kCarRadius - 0.1;
+        min_clear = std::min(min_clear, clear);
+      }
+    } else {
       const Vec2 piles[2] = {b_down_, b_up_};
       const double pr[2] = {down_r_, up_r_};
       for (int i = 0; i < 2; ++i) {
@@ -311,22 +318,17 @@ class Figure8Node : public rclcpp::Node {
 
   // 避障仲裁：输入原目标速度，输出避障后的速度。
   // 思路：原目标方向被「人」挡时，用方向搜索找一条"净空足够 + 偏离小"的方向，
-  // 并对方向做平滑（避免一顿一顿）。
-  // 直行段：偏转绕行。绕桩段：只停车等——绕圈靠径向修正闭环，换方向会和它打架。
+  // 并对方向做平滑（避免一顿一顿）。直行段和绕桩段共用这套逻辑：
+  // 绕圈时 target_ang 取切向（v_orig 方向）。桩允许贴边滑（只罚真撞），
+  // 车在人和桩之间会沿桩面滑过去，而不是在两个惩罚之间来回弹。
   Vec2 avoid_arbitrate(const Vec2& v_orig) {
     const State st = sm_.state();
 
-    // 绕桩段：前方有人就停，人走了继续绕。不偏转、不占状态机暂停。
-    if (st == State::OrbitDown || st == State::OrbitUp) {
-      avoid_state_ = AvoidState::Normal;
-      avoid_ang_ = 0.0;
-      const double r = std::hypot(v_orig.x, v_orig.y);
-      if (r < 1e-6) return v_orig;
-      const double ang = std::atan2(v_orig.y, v_orig.x);
-      return (clearance_in_dir(ang, false) >= kSafeDist) ? v_orig : Vec2{0.0, 0.0};
-    }
-
-    if (st != State::StraightIn && st != State::Cross && st != State::StraightOut) {
+    // 只有移动状态才避障；Idle/Stop 等静止状态原样返回
+    const bool moving = (st == State::StraightIn || st == State::Cross ||
+                         st == State::StraightOut || st == State::OrbitDown ||
+                         st == State::OrbitUp);
+    if (!moving) {
       avoid_state_ = AvoidState::Normal;
       avoid_ang_ = 0.0;
       return v_orig;
@@ -337,8 +339,11 @@ class Figure8Node : public rclcpp::Node {
     const Vec2 dir = (r < 1e-6) ? Vec2{1.0, 0.0} : Vec2{v_orig.x / r, v_orig.y / r};
     const double target_ang = std::atan2(dir.y, dir.x);
 
-    // 原目标方向是否畅通（只看人，桩不触发避障）
-    if (clearance_in_dir(target_ang, false) >= kSafeDist) {
+    // 原目标方向是否畅通（只看人，桩不触发避障）。
+    // 退出带迟滞：净空在阈值附近时避免 Normal/Stop 快速切换导致左右摆。
+    const double exit_req =
+        kSafeDist + ((avoid_state_ == AvoidState::Normal) ? 0.0 : kAvoidHyst);
+    if (clearance_in_dir(target_ang, ObstacleSet::kHuman) >= exit_req) {
       avoid_state_ = AvoidState::Normal;
       avoid_ang_ = 0.0;
       return v_orig;
@@ -363,17 +368,30 @@ class Figure8Node : public rclcpp::Node {
     double best_cost = 1e9;
     for (int deg : {-90, -60, -30, -15, 0, 15, 30, 60, 90}) {
       const double a = target_ang + deg * M_PI / 180.0;
-      const double clear = clearance_in_dir(a, true);   // 含桩，避免蹭桩
-      double dist_cost;
-      if (clear <= 0.05) {
-        dist_cost = 3.0;                       // 会蹭/会撞，重罚
-      } else if (clear >= kSafeDist) {
-        dist_cost = 0.0;                       // 足够安全
+      // 人：硬底线，净空不足按比例罚
+      const double clear_h = clearance_in_dir(a, ObstacleSet::kHuman);
+      double cost;
+      if (clear_h <= 0.05) {
+        cost = 3.0;                                // 会蹭/会撞人，重罚
+      } else if (clear_h >= kSafeDist) {
+        cost = 0.0;                                // 足够安全
       } else {
-        dist_cost = 1.0 - clear / kSafeDist;   // 净空不足，按比例罚
+        cost = 1.0 - clear_h / kSafeDist;          // 净空不足，按比例罚
+      }
+      // 桩：贴边不罚，允许沿桩面滑过去；只有真会撞才重罚（滑开，而不是弹回）
+      const double clear_p = clearance_in_dir(a, ObstacleSet::kPile);
+      if (clear_p <= 0.0) {
+        cost += 3.0;
+      } else if (clear_p < kPileBrushDist) {
+        cost += 1.5;
       }
       const double dev = std::fabs(deg) / 90.0;            // 偏离目标角度（0~1）
-      const double cost = dist_cost + 0.6 * dev;
+      cost += 0.6 * dev;
+      // 迟滞：离当前绕行方向越近优惠越多，避免在"避人"和"避桩"两个方向间来回跳
+      if (avoid_state_ == AvoidState::Avoid) {
+        const double d = std::fabs(wrap_pi(a - avoid_ang_));
+        cost -= kAvoidHystAng * std::max(0.0, 1.0 - d / (M_PI / 2.0));
+      }
       if (cost < best_cost) {
         best_cost = cost;
         best_ang = a;
@@ -402,9 +420,14 @@ class Figure8Node : public rclcpp::Node {
     const State cur = sm_.state();
     const bool near_is_up = (cur == State::OrbitUp);
     const Vec2 b_near = near_is_up ? b_up_ : b_down_;
+    const Vec2 b_far = near_is_up ? b_down_ : b_up_;
 
     const bool orbiting = (cur == State::OrbitDown || cur == State::OrbitUp);
-    if (orbiting) {
+    const bool avoiding = (avoid_state_ != AvoidState::Normal);
+    if (orbiting && !avoiding) {
+      // 避障期间先不累计（车偏离圆，bearing 每帧变化不代表纯绕桩进度）；
+      // 避障结束恢复累计时，bearing 相对避障前的净变化就是这段的真实绕行角，
+      // 不重置——否则障碍堵在绕圈路上时角度永远攒不够，状态机死锁在绕圈。
       update_accum_angle(b_near, near_is_up, !was_orbiting_);
     }
     was_orbiting_ = orbiting;
@@ -413,14 +436,15 @@ class Figure8Node : public rclcpp::Node {
     in.started = auto_start_ || started_;
     in.have_piles = have_piles_;
     in.b_near = b_near;
-    in.b_far = near_is_up ? b_down_ : b_up_;
+    in.b_far = b_far;
     in.accum_angle = accum_angle_;
     in.dist_to_cross = std::hypot(b_cross.x, b_cross.y);
     in.dist_to_park = dist_to_park;
     in.orbit_radius = near_is_up ? up_.R : down_.R;
-    // 避障激活期间暂停状态机推进：绕行路径可能擦过停车位/交叉点，
-    // 若照常推进会误切 Stop 导致停错位置。绕行结束（avoid_state_ 回到 Normal）再恢复。
-    if (avoid_state_ == AvoidState::Normal) {
+    // 避障激活期间暂停状态机推进，只为保护 StraightOut：绕行路径可能擦过停车位，
+    // 若照常推进会误切 Stop 停错位置。其余状态照常推进——障碍挡路时车必须能按
+    // 几何条件切状态，否则状态机冻结：StraightIn 永远到不了桩、绕圈绕完也没法切。
+    if (avoid_state_ == AvoidState::Normal || sm_.state() != State::StraightOut) {
       sm_.step(in);
     }
 
@@ -461,8 +485,10 @@ class Figure8Node : public rclcpp::Node {
     pub_->publish(msg);
 
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
-                         "state=%s v_now=%.3f vx=%.3f vy=%.3f",
-                         nav::to_string(sm_.state()), v_now_, c.vx, c.vy);
+                         "state=%s v_now=%.3f vx=%.3f vy=%.3f 桩距=%.2f 绕角=%.0f° 避障=%d",
+                         nav::to_string(sm_.state()), v_now_, c.vx, c.vy,
+                         std::hypot(b_near.x, b_near.y), accum_angle_ * 180.0 / M_PI,
+                         static_cast<int>(avoid_state_));
   }
 
   Vec2 park_;
