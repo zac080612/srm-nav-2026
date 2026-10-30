@@ -25,10 +25,9 @@ using nav::Vec2;
 class PerceptionNode : public rclcpp::Node {
  public:
   PerceptionNode() : Node("perception") {
-    // 高度切片：只保留地面以上这一段（桩的高度范围），去掉地面和天花板。
-    // 实车：下限负余量（tf_z 有误差）、上限覆盖半圆(高约0.10)。
-    declare_parameter("min_height", -0.10);
-    declare_parameter("max_height", 0.30);
+    // 高度切片放宽：不依赖 tf_z 精度，识别完全靠圆拟合 + 半径（桩形状）。
+    declare_parameter("min_height", -0.50);
+    declare_parameter("max_height", 1.50);
     // 距离过滤：太近是自己车体，太远是墙/杂物
     declare_parameter("min_range", 0.30);
     declare_parameter("max_range", 6.00);
