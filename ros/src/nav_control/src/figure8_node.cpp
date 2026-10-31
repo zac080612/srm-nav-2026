@@ -36,6 +36,7 @@ namespace {
 constexpr double kCarRadius = 0.27;  // 车体半径（URDF）
 constexpr double kMargin = 0.20;     // 绕桩安全余量
 constexpr double kSafeDist = 0.2;   // 安全净空：车表面到障碍表面留 20cm（不含车/桩半径，已在 clearance 里扣掉）
+constexpr double kAvoidRange = 1.2;  // 只避这个距离内的障碍：远处杂物先不管（早避只会左右摆），近了再反应
 constexpr double kAvoidHyst = 0.10;     // 退出避障的迟滞带（米）：净空要超过 kSafeDist+kAvoidHyst 才恢复
 constexpr double kAvoidHystAng = 0.25;  // 方向搜索时"当前绕行方向"的代价优惠，防止在避人/避桩之间来回跳
 constexpr double kPileExclude = 0.35;
@@ -287,6 +288,7 @@ class Figure8Node : public rclcpp::Node {
     if (which == ObstacleSet::kHuman) {
       // 障碍点（人）：点本身在人表面附近，保守加 0.1 余量
       for (const auto& p : obstacle_pts_) {
+        if (std::hypot(p.x, p.y) > kAvoidRange) continue;   // 远障碍不躲
         const double proj = p.x * dirx + p.y * diry;   // 沿方向的投影，<0 在车后方
         if (proj < 0) continue;
         const double lat = std::fabs(p.x * diry - p.y * dirx);  // 到行驶直线的垂直距离
@@ -344,6 +346,17 @@ class Figure8Node : public rclcpp::Node {
     if (avoid_state_ == AvoidState::Normal) {
       avoid_state_ = AvoidState::Stop;
       avoid_stop_count_ = 0;
+      // 诊断：打印最近障碍的距离和方向（杂物排查用）
+      double min_d = 1e9;
+      Vec2 min_p{0.0, 0.0};
+      for (const auto& p : obstacle_pts_) {
+        const double d = std::hypot(p.x, p.y);
+        if (d < min_d) { min_d = d; min_p = p; }
+      }
+      RCLCPP_INFO(get_logger(),
+                  "避障触发: 障碍点=%zu 最近(%.2f,%.2f)=%.2fm 目标角=%.0f°",
+                  obstacle_pts_.size(), min_p.x, min_p.y, min_d,
+                  target_ang * 180.0 / M_PI);
       return {0.0, 0.0};
     }
     if (avoid_state_ == AvoidState::Stop) {
