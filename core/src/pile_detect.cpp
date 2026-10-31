@@ -173,7 +173,9 @@ std::vector<Pile> detect_piles_structured(const std::vector<Vec2>& low_points,
       // 近距离豁免：半球在雷达俯角盲区（雷达高 0.2m，桩近于 0.8m 时打不到
       // 半球），环空是正常现象。只对 1m 内的簇豁免——绕桩半径 0.57m 的近桩
       // 必然在这个范围；远处的箱子棱角（竖直棱投影成点、散布≈0）不会豁免。
-      if (n_high >= 4 && std::hypot(c_h.x, c_h.y) < 1.0) {
+      // 点数要求 ≥8：近处细杆多层激光能打出 10~30 个点，而箱子棱角只有
+      // 每条层 1 个点（共 4~5 点），靠点数把「棱」挡在豁免之外。
+      if (n_high >= 8 && std::hypot(c_h.x, c_h.y) < 1.0) {
         out.push_back({c_h, 0.10});
       }
       continue;

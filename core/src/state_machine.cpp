@@ -8,7 +8,11 @@ namespace {
 
 constexpr double kArriveDist = 0.15;
 constexpr int kMissingLimit = 15;
-constexpr double kExitCos = -0.85;  // 出点判据：夹角 > 148° 时认为"车、桩、交叉点已共线"
+constexpr double kExitCos = -0.45;  // 出点判据：车、桩、交叉点夹角 > 117° 时认为可切出。
+                                    // 原值 -0.85（148°）要求车几乎精确经过共线点；
+                                    // 避障绕行会把车推宽、轨迹短路共线点，cos 最低只到
+                                    // -0.5 左右，永远切不出去。放宽后切出点偏离共线
+                                    // ~30°，Cross 会朝交叉点直线修正，安全。
 constexpr double kCrossNearDist = 0.15;  // 车离交叉点比这个近时，方向无法可靠判断。
                                          // 避障绕大圈会擦过交叉点附近（离 0.3m 左右），
                                          // 0.30 会让那段弧的共线判定整体失效，绕圈永远切不出去。

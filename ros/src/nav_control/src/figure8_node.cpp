@@ -42,12 +42,15 @@ constexpr double kAvoidHystAng = 0.25;  // 方向搜索时"当前绕行方向"�
 constexpr double kPileExclude = 0.35;
 constexpr double kAvoidSpeed = 0.5;
 constexpr int kStopFrames = 10;
-// 贴桩滑行阈值：桩的净空低于它才开始罚，≥ 它时允许沿桩面滑过去（不弹回）
-constexpr double kPileBrushDist = 0.08;
+constexpr int kPileMissingLimit = 150;  // 任一桩连续失联帧数上限（20ms/帧 → 3 秒）。
+                                        // 短暂遮挡（两桩一线、避障绕行）远小于 3 秒；
+                                        // 超过 3 秒 = 有东西持续挡桩，桩系定位不可信，降级停车。
 // 净空计算的对象集合。人和桩分开算，因为惩罚策略不同：
 // 人是硬底线（净空不足就罚），桩允许贴边滑（只有真会撞才重罚）。
 enum class ObstacleSet { kHuman, kPile };
-constexpr double kPileMatchDist = 0.5;     // 桩匹配阈值：离锁定坐标超过它就当成障碍
+constexpr double kPileMatchDist = 1.2;    // 桩匹配窗口（米）：避障绕行 1~2 秒桩的车体系
+                                          // 坐标可漂移 ~1m，窗口太小会永久失配。
+                                          // /piles 经结构化检测只有真桩，放宽是安全的。
 double wrap_pi(double a) {
   while (a > M_PI) a -= 2.0 * M_PI;
   while (a < -M_PI) a += 2.0 * M_PI;
@@ -172,18 +175,31 @@ class Figure8Node : public rclcpp::Node {
                   b_up_.x, b_up_.y, up_r_);
     }
 
-    // 每帧匹配：离锁定位置近的候选是真桩，远的忽略（杂物）
+    // 每帧匹配：就近指派——每个检测点分给离它最近的锁定桩。
+    // 旧的「各自独立匹配」在中点附近会把两个点都分给同一桩；就近指派不会。
     Vec2 down_b = b_down_;   // 默认锁定值（漏检时补上）
     Vec2 up_b = b_up_;
-    for (const auto& b : body) {
+    double best_dd = kPileMatchDist, best_du = kPileMatchDist;
+    int down_i = -1, up_i = -1;
+    for (size_t i = 0; i < body.size(); ++i) {
+      const auto& b = body[i];
       const double dd = std::hypot(b.pos.x - b_down_.x, b.pos.y - b_down_.y);
       const double du = std::hypot(b.pos.x - b_up_.x, b.pos.y - b_up_.y);
-      if (dd < kPileMatchDist && dd < du) {
-        down_b = b.pos; down_r_ = b.radius;
-      } else if (du < kPileMatchDist) {
-        up_b = b.pos; up_r_ = b.radius;
+      if (dd <= du) {
+        if (dd < best_dd) { best_dd = dd; down_i = static_cast<int>(i); }
+      } else {
+        if (du < best_du) { best_du = du; up_i = static_cast<int>(i); }
       }
-      // 离两个锁定位置都远 → 杂物，忽略
+    }
+    matched_down_ = down_i >= 0;
+    matched_up_ = up_i >= 0;
+    if (matched_down_) {
+      down_b = body[static_cast<size_t>(down_i)].pos;
+      down_r_ = body[static_cast<size_t>(down_i)].radius;
+    }
+    if (matched_up_) {
+      up_b = body[static_cast<size_t>(up_i)].pos;
+      up_r_ = body[static_cast<size_t>(up_i)].radius;
     }
     b_down_ = down_b;
     b_up_ = up_b;
@@ -382,12 +398,12 @@ class Figure8Node : public rclcpp::Node {
       } else {
         cost = 1.0 - clear_h / kSafeDist;          // 净空不足，按比例罚
       }
-      // 桩：贴边不罚，允许沿桩面滑过去；只有真会撞才重罚（滑开，而不是弹回）
+      // 桩：贴边滑行不罚（滑开机制——允许车沿桩面滑过去），只有真会撞才重罚。
+      // 注意不能给贴桩方向加小罚：它比「绕远」的偏离代价(0.6)还贵的话，
+      // 方向搜索每次都会选绕远，滑行就永远不生效。
       const double clear_p = clearance_in_dir(a, ObstacleSet::kPile);
       if (clear_p <= 0.0) {
         cost += 3.0;
-      } else if (clear_p < kPileBrushDist) {
-        cost += 1.5;
       }
       const double dev = std::fabs(deg) / 90.0;            // 偏离目标角度（0~1）
       cost += 0.6 * dev;
@@ -415,6 +431,26 @@ class Figure8Node : public rclcpp::Node {
     // 不依赖 odom：桩锁定（车体系）之后就能跑，桩系定位不需要里程计
     if (!have_piles_) return;
 
+    // 桩失联监控：锁定值只能撑短时（两桩一线短暂遮挡、避障绕行）。
+    // 任一桩持续失联（被障碍挡住/桩系漂移），继续开会朝过期坐标跑飞或绕圈死循环，
+    // 必须降级停车等桩恢复。
+    const State cur = sm_.state();
+    const bool near_is_up = (cur == State::OrbitUp);
+    (void)near_is_up;
+    if (!matched_down_ || !matched_up_) {
+      ++pile_missing_;
+    } else {
+      pile_missing_ = 0;
+    }
+    if (pile_missing_ > kPileMissingLimit) {
+      have_piles_ = false;
+      pile_missing_ = 0;
+      RCLCPP_WARN(get_logger(),
+                  "桩持续失联超过 %.0f 秒，降级停车，等桩恢复",
+                  kPileMissingLimit * 0.02);
+      return;
+    }
+
     const Vec2 b_cross = {(b_down_.x + b_up_.x) * 0.5,
                           (b_down_.y + b_up_.y) * 0.5};
     // 返程目标：停车位在桩系的坐标（启动时已标定），转成车体系方向。
@@ -422,12 +458,22 @@ class Figure8Node : public rclcpp::Node {
     const Vec2 b_park = to_park_body(b_down_, b_up_, p_park_);
     const double dist_to_park = std::hypot(b_park.x, b_park.y);
 
-    const State cur = sm_.state();
-    const bool near_is_up = (cur == State::OrbitUp);
     const Vec2 b_near = near_is_up ? b_up_ : b_down_;
     const Vec2 b_far = near_is_up ? b_down_ : b_up_;
 
     const bool orbiting = (cur == State::OrbitDown || cur == State::OrbitUp);
+    if (cur == State::OrbitDown) {
+      const double cx = (b_near.x + b_far.x) * 0.5;
+      const double cy = (b_near.y + b_far.y) * 0.5;
+      const double nr = std::hypot(b_near.x, b_near.y);
+      const double cr = std::hypot(cx, cy);
+      const double cos_a =
+          (nr > 1e-9 && cr > 1e-9) ? (b_near.x * cx + b_near.y * cy) / (nr * cr)
+                                   : 9.0;
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "OrbitDown诊断: b近=(%.2f,%.2f) b远=(%.2f,%.2f) cos=%.2f",
+                           b_near.x, b_near.y, b_far.x, b_far.y, cos_a);
+    }
     const bool avoiding = (avoid_state_ != AvoidState::Normal);
     if (orbiting && !avoiding) {
       // 避障期间先不累计（车偏离圆，bearing 每帧变化不代表纯绕桩进度）；
@@ -516,6 +562,9 @@ class Figure8Node : public rclcpp::Node {
   Vec2 b_down_{0.0, 0.0};
   Vec2 b_up_{0.0, 0.0};
   bool have_piles_{false};
+  bool matched_down_{false};   // 本感知帧是否匹配到下桩（近桩失联监控用）
+  bool matched_up_{false};     // 本感知帧是否匹配到上桩
+  int pile_missing_{0};        // 近桩连续失联帧数
 
   Vec2 pile_down_w_{0.0, 0.0};  // 下桩世界坐标（启动时锁定，固定不动）
   Vec2 pile_up_w_{0.0, 0.0};    // 上桩世界坐标（启动时锁定，固定不动）

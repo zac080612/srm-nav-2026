@@ -38,3 +38,4 @@ verify_result.txt
 docs/*.docx
 build-core-wsl/
 *.log
+obstacle_result.txt

@@ -197,6 +197,22 @@
       </link>
     </model>
 
+    <!-- 临时测试障碍（"人"）：返程路线外侧 0.35m（挡路触发避障，
+         但离「启动位→上桩」视线 0.35m，箱角(0.21m)也不挡杆） -->
+    <model name="test_person">
+      <static>true</static>
+      <pose>-0.43 -0.61 0.25 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 0.5</size></box></geometry>
+          <material><ambient>0 0 0 1</ambient><diffuse>0 0 0 1</diffuse></material>
+        </visual>
+        <collision name="collision">
+          <geometry><box><size>0.3 0.3 0.5</size></box></geometry>
+        </collision>
+      </link>
+    </model>
+
     <!-- ==================== 全向车 ====================
          kinematic=true：SetLinearVel 精确控制速度，不被地面摩擦拖慢。
          碰撞体压扁到 z∈[0,0.04]：5 层激光从车中心水平射出（层高 0.05 起），
