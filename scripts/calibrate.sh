@@ -27,6 +27,8 @@ set -u
 
 cleanup() {
   pkill -f calib_node 2>/dev/null
+  pkill -f figure8_node 2>/dev/null   # 主程序会抢 /raw_frame，必须杀掉
+  pkill -f perception_node 2>/dev/null
   pkill -f serial_node 2>/dev/null
   pkill -f livox_ros_driver2_node 2>/dev/null
   sleep 1
