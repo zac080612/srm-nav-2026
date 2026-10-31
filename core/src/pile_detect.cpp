@@ -129,4 +129,66 @@ std::vector<Pile> detect_piles(const std::vector<Vec2>& points,
   return out;
 }
 
+// 结构化桩检测：高带细杆点定圆心，低带圆环验证半径。
+// 为什么不用「低带弧直接拟合圆心」：单层激光只看到桩一小段弧，短弧拟合
+// 圆心会沿法线漂移几十厘米（半径反而准）。细杆点稀疏但投影就是圆心，
+// 用它定位、用低带环验证半径，两个带互相兜底：
+//   矮圆柱/半球无杆 → 高带无点；粗柱/细柱 → 高带散布 = 柱半径，太大。
+std::vector<Pile> detect_piles_structured(const std::vector<Vec2>& low_points,
+                                          const std::vector<Vec2>& high_points,
+                                          const PileDetectParams& p,
+                                          const PileStructureParams& sp) {
+  std::vector<Pile> out;
+  const auto clusters = cluster_points(high_points, p.cluster_dist);
+  for (const auto& cl : clusters) {
+    const int n_high = static_cast<int>(cl.size());
+    if (n_high < sp.high_min_pts) continue;
+
+    // 细杆簇质心 = 候选圆心（细杆投影准，短弧拟合圆心会漂，不能用它定位）
+    Vec2 c_h{0.0, 0.0};
+    for (const auto& q : cl) {
+      c_h.x += q.x;
+      c_h.y += q.y;
+    }
+    c_h.x /= n_high;
+    c_h.y /= n_high;
+
+    // 细杆细：簇的散布（点到质心最大距离）必须小。
+    // 上下一样粗的柱子散布 = 柱半径（≥5cm），真桩细杆散布 ≈1cm。
+    double spread = 0.0;
+    for (const auto& q : cl) {
+      spread = std::max(spread, std::hypot(q.x - c_h.x, q.y - c_h.y));
+    }
+    if (spread > sp.high_spread_max) continue;
+
+    // 圆心周围低带环：收集「像半圆」的点，拟合验证半径
+    const double r_lo = 0.4 * p.min_radius;
+    const double r_hi = 1.6 * p.max_radius;
+    std::vector<Vec2> ring;
+    for (const auto& q : low_points) {
+      const double d = std::hypot(q.x - c_h.x, q.y - c_h.y);
+      if (d >= r_lo && d <= r_hi) ring.push_back(q);
+    }
+    if (ring.size() < p.min_points) {
+      // 近距离豁免：半球在雷达俯角盲区（雷达高 0.2m，桩近于 0.8m 时打不到
+      // 半球），环空是正常现象。只对 1m 内的簇豁免——绕桩半径 0.57m 的近桩
+      // 必然在这个范围；远处的箱子棱角（竖直棱投影成点、散布≈0）不会豁免。
+      if (n_high >= 4 && std::hypot(c_h.x, c_h.y) < 1.0) {
+        out.push_back({c_h, 0.10});
+      }
+      continue;
+    }
+
+    Vec2 c_fit;
+    double r_fit = 0.0;
+    if (!fit_circle(ring, c_fit, r_fit)) continue;
+    if (r_fit < p.min_radius || r_fit > p.max_radius) continue;
+    if (!pile_like(ring, c_fit, r_fit, p.max_fit_rms, 0.0)) continue;
+    // 拟合圆心必须与细杆质心一致（排除「细杆旁边恰有别的圆」）
+    if (std::hypot(c_fit.x - c_h.x, c_fit.y - c_h.y) > sp.high_match_r) continue;
+    out.push_back({c_fit, r_fit});
+  }
+  return out;
+}
+
 }  // namespace nav

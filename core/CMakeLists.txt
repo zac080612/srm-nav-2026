@@ -32,6 +32,9 @@ target_include_directories(nav_core PUBLIC
   $<INSTALL_INTERFACE:include>)
 
 if(MSVC)
+  # /utf-8：源文件是 UTF-8（中文注释），MSVC 默认按本地代码页 GBK 解析会报错
+  # _USE_MATH_DEFINES：MSVC 的 <cmath> 默认不提供 M_PI
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8 /D_USE_MATH_DEFINES")
   target_compile_options(nav_core PRIVATE /W4)
 else()
   target_compile_options(nav_core PRIVATE -Wall -Wextra)
@@ -55,6 +58,7 @@ set(NAV_TESTS
   test_calib
   test_pile_detect
   test_pile_frame
+  test_pile_structure
 )
 
 foreach(t ${NAV_TESTS})

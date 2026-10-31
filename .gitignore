@@ -36,3 +36,5 @@ verify_result.txt
 
 # ---- 赛务发的任务书等文档（不随代码上传）----
 docs/*.docx
+build-core-wsl/
+*.log

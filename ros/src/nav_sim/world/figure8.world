@@ -8,16 +8,43 @@
       <uri>model://sun</uri>
     </include>
 
+    <!-- ==================== 真桩（与实车形状一致） ====================
+         下半部：半径 10cm 半球（高 10cm），球心在地面 z=0
+         上半部：半径 1cm 细杆，z 0.10~0.85 -->
+
     <!-- 下桩（绕逆时针） -->
     <model name="pile_down">
       <static>true</static>
-      <pose>0 -1.0 0.5 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
+      <pose>0 -1.0 0 0 0 0</pose>
+      <!-- 下半球 -->
+      <link name="base_link">
+        <visual name="base_visual">
+          <geometry>
+            <sphere>
+              <radius>0.10</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+          </material>
+        </visual>
+        <collision name="base_collision">
+          <geometry>
+            <sphere>
+              <radius>0.10</radius>
+            </sphere>
+          </geometry>
+        </collision>
+      </link>
+      <!-- 上细杆 -->
+      <link name="rod_link">
+        <pose>0 0 0.475 0 0 0</pose>
+        <visual name="rod_visual">
           <geometry>
             <cylinder>
-              <radius>0.08</radius>
-              <length>1.0</length>
+              <radius>0.01</radius>
+              <length>0.75</length>
             </cylinder>
           </geometry>
           <material>
@@ -25,27 +52,52 @@
             <diffuse>1 0 0 1</diffuse>
           </material>
         </visual>
-        <collision name="collision">
+        <collision name="rod_collision">
           <geometry>
             <cylinder>
-              <radius>0.08</radius>
-              <length>1.0</length>
+              <radius>0.01</radius>
+              <length>0.75</length>
             </cylinder>
           </geometry>
         </collision>
       </link>
+      <joint name="fix_rod" type="fixed">
+        <parent>base_link</parent>
+        <child>rod_link</child>
+      </joint>
     </model>
 
     <!-- 上桩（绕顺时针） -->
     <model name="pile_up">
       <static>true</static>
-      <pose>0 1.0 0.5 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
+      <pose>0 1.0 0 0 0 0</pose>
+      <link name="base_link">
+        <visual name="base_visual">
+          <geometry>
+            <sphere>
+              <radius>0.10</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0 1 0 1</ambient>
+            <diffuse>0 1 0 1</diffuse>
+          </material>
+        </visual>
+        <collision name="base_collision">
+          <geometry>
+            <sphere>
+              <radius>0.10</radius>
+            </sphere>
+          </geometry>
+        </collision>
+      </link>
+      <link name="rod_link">
+        <pose>0 0 0.475 0 0 0</pose>
+        <visual name="rod_visual">
           <geometry>
             <cylinder>
-              <radius>0.08</radius>
-              <length>1.0</length>
+              <radius>0.01</radius>
+              <length>0.75</length>
             </cylinder>
           </geometry>
           <material>
@@ -53,22 +105,106 @@
             <diffuse>0 1 0 1</diffuse>
           </material>
         </visual>
-        <collision name="collision">
+        <collision name="rod_collision">
           <geometry>
             <cylinder>
-              <radius>0.08</radius>
-              <length>1.0</length>
+              <radius>0.01</radius>
+              <length>0.75</length>
             </cylinder>
           </geometry>
         </collision>
       </link>
+      <joint name="fix_rod" type="fixed">
+        <parent>base_link</parent>
+        <child>rod_link</child>
+      </joint>
     </model>
 
-    <!-- 全向车：内联进 world，绕开 spawn_entity（factory 插件在 WSL2 会崩）。
-         kinematic=true：SetLinearVel 精确控制速度，不被地面摩擦拖慢 -->
+    <!-- ==================== 杂物（都在 8 字路线外 1m 以上，不挡路） ====================
+         杂物1 矮圆柱 h=0.12 r=0.10：低带圆过关，上方 0 点 → 应被滤
+         杂物2 粗柱   h=0.90 r=0.12：上下一样粗 → 高带散布大 → 应被滤
+         杂物3 半球无杆 r=0.10：长得像桩底座 → 高带无点 → 应被滤
+         杂物4 细柱   h=0.90 r=0.05：全高细柱 → 高带散布 5cm → 应被滤
+         杂物5 箱子 0.3×0.3×0.4：直线面 → 圆拟合失败 → 应被滤 -->
+
+    <model name="clutter_low_drum">
+      <static>true</static>
+      <pose>2.6 -0.6 0.06 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><cylinder><radius>0.10</radius><length>0.12</length></cylinder></geometry>
+          <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material>
+        </visual>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.10</radius><length>0.12</length></cylinder></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="clutter_fat_pole">
+      <static>true</static>
+      <pose>2.8 1.9 0.45 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><cylinder><radius>0.12</radius><length>0.90</length></cylinder></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.12</radius><length>0.90</length></cylinder></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="clutter_half_sphere">
+      <static>true</static>
+      <pose>-2.8 0.6 0 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><sphere><radius>0.10</radius></sphere></geometry>
+          <material><ambient>0.3 0.3 0.8 1</ambient><diffuse>0.3 0.3 0.8 1</diffuse></material>
+        </visual>
+        <collision name="collision">
+          <geometry><sphere><radius>0.10</radius></sphere></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="clutter_thin_pole">
+      <static>true</static>
+      <pose>-2.4 -1.9 0.45 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><cylinder><radius>0.05</radius><length>0.90</length></cylinder></geometry>
+          <material><ambient>0.8 0.6 0.2 1</ambient><diffuse>0.8 0.6 0.2 1</diffuse></material>
+        </visual>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.05</radius><length>0.90</length></cylinder></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="clutter_box">
+      <static>true</static>
+      <pose>1.9 -2.9 0.2 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 0.4</size></box></geometry>
+          <material><ambient>0.4 0.7 0.4 1</ambient><diffuse>0.4 0.7 0.4 1</diffuse></material>
+        </visual>
+        <collision name="collision">
+          <geometry><box><size>0.3 0.3 0.4</size></box></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- ==================== 全向车 ====================
+         kinematic=true：SetLinearVel 精确控制速度，不被地面摩擦拖慢。
+         碰撞体压扁到 z∈[0,0.04]：5 层激光从车中心水平射出（层高 0.05 起），
+         压扁的碰撞体挡不住射线，射线也就不会打到车自身。 -->
+
     <model name="robot">
       <kinematic>true</kinematic>
-      <pose>-1.5 -2.5 0.1 0 0 0</pose>
+      <pose>-1.5 -2.5 0.02 0 0 0</pose>
       <link name="base_link">
         <visual name="visual">
           <geometry>
@@ -86,7 +222,7 @@
           <geometry>
             <cylinder>
               <radius>0.27</radius>
-              <length>0.2</length>
+              <length>0.04</length>
             </cylinder>
           </geometry>
         </collision>
@@ -102,14 +238,16 @@
           </inertia>
         </inertial>
 
-        <!-- 360° 2D 激光雷达：检测竖直桩（水平截面是圆）。
-             抬高到车顶上方（世界 z=0.3，超出车圆柱最高 0.2），避免扫到车自身 -->
-        <sensor name="lidar" type="ray">
-          <pose>0 0 0.2 0 0 0</pose>
+        <!-- 5 层水平激光，模拟实车 Livox 在 5 个高度看到的截面：
+             低带 0.05/0.06（半球截面 r≈0.08）、中间 0.25、
+             高带 0.45/0.80（细杆截面 r=0.01）。
+             起点 z_rel = 层高 - 0.02（link 原点在世界 z=0.02）。 -->
+        <sensor name="lidar_low1" type="ray">
+          <pose>0 0 0.03 0 0 0</pose>
           <ray>
             <scan>
               <horizontal>
-                <samples>720</samples>
+                <samples>1440</samples>
                 <resolution>1</resolution>
                 <min_angle>-3.14159</min_angle>
                 <max_angle>3.14159</max_angle>
@@ -121,10 +259,118 @@
               <resolution>0.01</resolution>
             </range>
           </ray>
-          <plugin name="lidar_plugin" filename="libgazebo_ros_ray_sensor.so">
+          <plugin name="lidar_low1_plugin" filename="libgazebo_ros_ray_sensor.so">
             <ros>
               <namespace>/</namespace>
-              <remapping>~/out:=/scan</remapping>
+              <remapping>~/out:=/scan_low1</remapping>
+            </ros>
+            <output_type>sensor_msgs/LaserScan</output_type>
+            <frame_name>base_link</frame_name>
+          </plugin>
+        </sensor>
+
+        <sensor name="lidar_low2" type="ray">
+          <pose>0 0 0.04 0 0 0</pose>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>1440</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159</min_angle>
+                <max_angle>3.14159</max_angle>
+              </horizontal>
+            </scan>
+            <range>
+              <min>0.1</min>
+              <max>10.0</max>
+              <resolution>0.01</resolution>
+            </range>
+          </ray>
+          <plugin name="lidar_low2_plugin" filename="libgazebo_ros_ray_sensor.so">
+            <ros>
+              <namespace>/</namespace>
+              <remapping>~/out:=/scan_low2</remapping>
+            </ros>
+            <output_type>sensor_msgs/LaserScan</output_type>
+            <frame_name>base_link</frame_name>
+          </plugin>
+        </sensor>
+
+        <sensor name="lidar_mid" type="ray">
+          <pose>0 0 0.23 0 0 0</pose>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>1440</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159</min_angle>
+                <max_angle>3.14159</max_angle>
+              </horizontal>
+            </scan>
+            <range>
+              <min>0.1</min>
+              <max>10.0</max>
+              <resolution>0.01</resolution>
+            </range>
+          </ray>
+          <plugin name="lidar_mid_plugin" filename="libgazebo_ros_ray_sensor.so">
+            <ros>
+              <namespace>/</namespace>
+              <remapping>~/out:=/scan_mid</remapping>
+            </ros>
+            <output_type>sensor_msgs/LaserScan</output_type>
+            <frame_name>base_link</frame_name>
+          </plugin>
+        </sensor>
+
+        <sensor name="lidar_high1" type="ray">
+          <pose>0 0 0.43 0 0 0</pose>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>1440</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159</min_angle>
+                <max_angle>3.14159</max_angle>
+              </horizontal>
+            </scan>
+            <range>
+              <min>0.1</min>
+              <max>10.0</max>
+              <resolution>0.01</resolution>
+            </range>
+          </ray>
+          <plugin name="lidar_high1_plugin" filename="libgazebo_ros_ray_sensor.so">
+            <ros>
+              <namespace>/</namespace>
+              <remapping>~/out:=/scan_high1</remapping>
+            </ros>
+            <output_type>sensor_msgs/LaserScan</output_type>
+            <frame_name>base_link</frame_name>
+          </plugin>
+        </sensor>
+
+        <sensor name="lidar_high2" type="ray">
+          <pose>0 0 0.78 0 0 0</pose>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>1440</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159</min_angle>
+                <max_angle>3.14159</max_angle>
+              </horizontal>
+            </scan>
+            <range>
+              <min>0.1</min>
+              <max>10.0</max>
+              <resolution>0.01</resolution>
+            </range>
+          </ray>
+          <plugin name="lidar_high2_plugin" filename="libgazebo_ros_ray_sensor.so">
+            <ros>
+              <namespace>/</namespace>
+              <remapping>~/out:=/scan_high2</remapping>
             </ros>
             <output_type>sensor_msgs/LaserScan</output_type>
             <frame_name>base_link</frame_name>

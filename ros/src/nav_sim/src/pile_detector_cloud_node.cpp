@@ -40,20 +40,20 @@ class PerceptionNode : public rclcpp::Node {
     declare_parameter("tf_yaw", 0.0);
     declare_parameter("cloud_topic", "/livox/lidar");
     // 桩几何：下半部半径约 10cm 的半圆（高约 10cm），上半部半径 1cm 细杆。
-    // 半径 0.085~0.15 包住真桩留拟合余量；赛场干净，弧长检查关闭、残差放宽。
-    declare_parameter("min_radius", 0.085);
-    declare_parameter("max_radius", 0.15);
+    // 半径是弱特征（短弧/混合拟合会偏小到 0.05），放宽到 0.04~0.11；
+    // 真桩靠「细杆散布小 + 环验证 + 圆心一致」识别（detect_piles_structured）。
+    declare_parameter("min_radius", 0.04);
+    declare_parameter("max_radius", 0.11);
     declare_parameter("min_points", 3);
     declare_parameter("cluster_dist", 0.20);
-    declare_parameter("max_fit_rms", 0.06);
+    declare_parameter("max_fit_rms", 0.08);
     declare_parameter("min_arc_deg", 0.0);
-    // 结构验证：真桩 = 低带（半圆）+ 上方稀疏细杆点。
-    // 低带找圆，高带数点：0 个 = 矮杂物，太多 = 上下一样粗的粗杂物。
+    // 结构验证：低带找半圆底座，高带找细杆，联合识别
     declare_parameter("pile_low_max", 0.15);
     declare_parameter("pile_high_min", 0.35);
-    declare_parameter("high_match_r", 0.06);
+    declare_parameter("high_match_r", 0.10);
     declare_parameter("high_min_pts", 2);
-    declare_parameter("high_max_pts", 40);
+    declare_parameter("high_spread_max", 0.03);
 
     min_h_ = get_parameter("min_height").as_double();
     max_h_ = get_parameter("max_height").as_double();
@@ -75,9 +75,9 @@ class PerceptionNode : public rclcpp::Node {
 
     pile_low_max_ = get_parameter("pile_low_max").as_double();
     pile_high_min_ = get_parameter("pile_high_min").as_double();
-    high_match_r_ = get_parameter("high_match_r").as_double();
-    high_min_pts_ = get_parameter("high_min_pts").as_int();
-    high_max_pts_ = get_parameter("high_max_pts").as_int();
+    struct_.high_match_r = get_parameter("high_match_r").as_double();
+    struct_.high_min_pts = get_parameter("high_min_pts").as_int();
+    struct_.high_spread_max = get_parameter("high_spread_max").as_double();
 
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         topic, rclcpp::SensorDataQoS(),
@@ -112,15 +112,17 @@ class PerceptionNode : public rclcpp::Node {
       const int gx = static_cast<int>(std::floor(x * inv_voxel));
       const int gy = static_cast<int>(std::floor(y * inv_voxel));
       const int band = (z <= pile_low_max_) ? 0 : ((z >= pile_high_min_) ? 1 : 2);
+      if (band == 1) {
+        // 高带（细杆）不做体素降采样：杆 r=1cm，0.04 体素会把整根杆并成 1 点
+        all.push_back({x, y});
+        high.push_back({x, y});
+        continue;
+      }
       const int64_t key = (static_cast<int64_t>(gx) << 40) ^
                           (static_cast<int64_t>(gy) << 8) ^ band;
       if (!seen.insert(key).second) continue;
       all.push_back({x, y});
-      if (band == 0) {
-        low.push_back({x, y});
-      } else if (band == 1) {
-        high.push_back({x, y});
-      }
+      if (band == 0) low.push_back({x, y});
     }
   }
 
@@ -158,24 +160,14 @@ class PerceptionNode : public rclcpp::Node {
     std::vector<Vec2> all, low, high;
     to_points(*msg, all, low, high);
 
-    // 1) 桩检测：只在低带（半圆）里找圆
-    const auto piles = nav::detect_piles(low, params_);
+    // 结构化桩检测：高带细杆点定圆心，低带半圆环验证半径。
+    // 实车和仿真共用的 core 算法（有几何模拟单测覆盖）。
+    const auto piles = nav::detect_piles_structured(low, high, params_, struct_);
 
-    // 2) 结构验证：真桩 = 低带圆正上方有"稀疏"的细杆点。
-    //    上方 0 点 = 矮杂物；上方点太多 = 上下一样粗的粗杂物。
-    std::vector<nav::Pile> kept;
-    for (const auto& pl : piles) {
-      int n = 0;
-      for (const auto& p : high) {
-        if (std::hypot(p.x - pl.center.x, p.y - pl.center.y) < high_match_r_) ++n;
-      }
-      if (n >= high_min_pts_ && n <= high_max_pts_) kept.push_back(pl);
-    }
-
-    // 3) 验证后的桩 → /piles
+    // 验证后的桩 → /piles
     visualization_msgs::msg::MarkerArray arr;
     int id = 0;
-    for (const auto& pl : kept) {
+    for (const auto& pl : piles) {
       visualization_msgs::msg::Marker m;
       m.header = msg->header;
       m.ns = "piles";
@@ -197,12 +189,12 @@ class PerceptionNode : public rclcpp::Node {
     }
     piles_pub_->publish(arr);
 
-    // 4) 全部 2D 点 → /scan（避障要看完整轮廓，不分带）
+    // 全部 2D 点 → /scan（避障要看完整轮廓，不分带）
     publish_scan(all, msg->header);
 
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
-                         "2D点=%zu 低带=%zu 高带=%zu 圆候选=%zu 真桩=%zu",
-                         all.size(), low.size(), high.size(), piles.size(), kept.size());
+                         "2D点=%zu 低带=%zu 高带=%zu 检测到 %zu 个桩",
+                         all.size(), low.size(), high.size(), piles.size());
   }
 
   double min_h_{0.10}, max_h_{1.50};
@@ -210,10 +202,9 @@ class PerceptionNode : public rclcpp::Node {
   double voxel_{0.05};
   double tf_x_{0.0}, tf_y_{0.0}, tf_z_{0.0}, tf_yaw_{0.0};
   double pile_low_max_{0.15}, pile_high_min_{0.35};
-  double high_match_r_{0.06};
-  int high_min_pts_{2}, high_max_pts_{40};
 
   nav::PileDetectParams params_;
+  nav::PileStructureParams struct_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr piles_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
